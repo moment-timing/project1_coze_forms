@@ -2762,7 +2762,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.16,<2" },
     { name = "boto3", specifier = ">=1.40,<2" },
     { name = "chardet", specifier = ">=5.2,<6" },
-    { name = "coze-coding-dev-sdk", specifier = ">=0.5.25" },
+    { name = "coze-coding-dev-sdk", specifier = ">=0.5.26" },
     { name = "coze-coding-utils", specifier = ">=0.2.8" },
     { name = "coze-workload-identity", specifier = ">=0.1.4,<1" },
     { name = "cozeloop", specifier = ">=0.1.25,<1" },
