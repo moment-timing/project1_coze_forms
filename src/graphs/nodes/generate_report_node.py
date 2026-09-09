@@ -13,6 +13,8 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.chart import LineChart, Reference
 from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.axis import ChartLines
+from openpyxl.chart.marker import Marker
 
 from graphs.state import GenerateReportInput, GenerateReportOutput, CategoryData
 
@@ -90,6 +92,13 @@ def _nice_step(maxv: float) -> float:
         if raw <= m * mag:
             return m * mag
     return 10 * mag
+
+
+def _ceil_to(value: float, step: float) -> float:
+    """将 value 向上取整到 step 的整数倍。"""
+    if step <= 0:
+        return value
+    return math.ceil(value / step) * step
 
 
 def _build_source_block(ws, years: List[str], monthly: List[Dict[str, Any]], src_col: int) -> None:
@@ -277,6 +286,20 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
 
+    # 关键修复：数据源位于隐藏列，若保持“仅绘制可见单元格”会导致图表空白
+    chart.visible_cells_only = False
+
+    # 线条样式：每条折线一种颜色 + 圆形数据点标记(蓝/橙/绿/红)
+    _line_colors = ("4472C4", "ED7D31", "70AD47", "C00000")
+    for idx, ser in enumerate(chart.ser):
+        color = _line_colors[idx % len(_line_colors)]
+        ser.graphicalProperties.line.solidFill = color
+        ser.graphicalProperties.line.width = 20000  # 约2pt
+        mk = Marker(symbol="circle", size=7)
+        mk.graphicalProperties.solidFill = color
+        mk.graphicalProperties.line.solidFill = color
+        ser.marker = mk
+
     # 坐标轴刻度清晰标注
     chart.x_axis.majorTickMark = "out"
     chart.y_axis.majorTickMark = "out"
@@ -285,20 +308,26 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
     chart.y_axis.title = "销售额(万元)"
     chart.x_axis.title = "月份"
     chart.y_axis.numFmt = '#,##0"万"'
+    # 浅色网格线(横向+纵向)，方便读数
+    chart.x_axis.majorGridlines = ChartLines()
+    chart.y_axis.majorGridlines = ChartLines()
 
-    # 统计最大值以获得清晰Y轴刻度
+    # 统计最大值以获得清晰Y轴刻度(从0开始，向上取整)
     maxv = 1.0
     by_year = _build_monthly_by_year_wan(monthly, years)
     for y in years:
         m = max(by_year[y]) if by_year[y] else 0.0
         if m > maxv:
             maxv = m
-    chart.y_axis.majorUnit = _nice_step(maxv)
+    _step = _nice_step(maxv)
+    chart.y_axis.scaling.min = 0
+    chart.y_axis.majorUnit = _step
+    chart.y_axis.scaling.max = _ceil_to(maxv, _step)
 
     # 数据点数值标注(万元)，刻度标清楚
     chart.dataLabels = DataLabelList()
     chart.dataLabels.showVal = True
-    chart.dataLabels.numFmt = '#,##0'
+    chart.dataLabels.numFmt = '#,##0"万"'
     chart.dataLabels.dLblPos = "t"  # 数值显示在数据点上方
 
     chart.legend.position = "b"
