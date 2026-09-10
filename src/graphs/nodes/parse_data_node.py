@@ -101,6 +101,14 @@ def parse_data_node(
             if isinstance(m, dict):
                 monthly.append(dict(m))
 
+    # 平台品牌汇总数据(platform_brand_summary)
+    brand_summary: List[Dict[str, Any]] = []
+    raw_brand = data.get("platform_brand_summary")
+    if isinstance(raw_brand, list):
+        for b in raw_brand:
+            if isinstance(b, dict):
+                brand_summary.append(dict(b))
+
     years = _collect_years(categories, monthly)
 
     return ParseDataOutput(
@@ -109,4 +117,5 @@ def parse_data_node(
         categories=categories,
         monthly_summary=monthly,
         years=years,
+        platform_brand_summary=brand_summary,
     )

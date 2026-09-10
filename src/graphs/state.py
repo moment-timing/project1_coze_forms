@@ -17,6 +17,9 @@ class GlobalState(BaseModel):
     categories: List[CategoryData] = Field(default=[], description="平台类目按年聚合数据")
     monthly_summary: List[Dict[str, Any]] = Field(default=[], description="全局月度汇总数据")
     years: List[str] = Field(default=[], description="出现的年份列表(升序)")
+    platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据(platform_brand_summary)")
+    analysis_result: Dict[str, Any] = Field(default={}, description="市场分析结果(年度/季度/平台品牌/趋势/结论 + 品牌分析表)")
+    pie_data: List[Dict[str, Any]] = Field(default=[], description="各平台品牌份额饼图数据")
     report_key: str = Field(default="", description="对象存储上报的key")
     report_url: str = Field(default="", description="Excel报告下载URL")
 
@@ -45,6 +48,24 @@ class ParseDataOutput(BaseModel):
     categories: List[CategoryData] = Field(default=[], description="平台类目按年聚合数据")
     monthly_summary: List[Dict[str, Any]] = Field(default=[], description="全局月度汇总数据")
     years: List[str] = Field(default=[], description="出现的年份列表(升序)")
+    platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据")
+
+
+class AnalysisInput(BaseModel):
+    """市场分析节点输入"""
+    shop_name: str = Field(..., description="目标产品名称(大类)")
+    stat_time: str = Field(..., description="统计时间")
+    raw_data: str = Field(default="", description="原始数据JSON字符串(用于季度等维度分析)")
+    categories: List[CategoryData] = Field(default=[], description="平台类目按年聚合数据")
+    monthly_summary: List[Dict[str, Any]] = Field(default=[], description="全局月度汇总数据")
+    years: List[str] = Field(default=[], description="出现的年份列表(升序)")
+    platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据")
+
+
+class AnalysisOutput(BaseModel):
+    """市场分析节点输出"""
+    analysis_result: Dict[str, Any] = Field(default={}, description="市场分析结果(含分析文本与品牌分析表)")
+    pie_data: List[Dict[str, Any]] = Field(default=[], description="各平台品牌份额饼图数据")
 
 
 class GenerateReportInput(BaseModel):
@@ -54,6 +75,9 @@ class GenerateReportInput(BaseModel):
     categories: List[CategoryData] = Field(default=[], description="平台类目按年聚合数据")
     monthly_summary: List[Dict[str, Any]] = Field(default=[], description="全局月度汇总数据")
     years: List[str] = Field(default=[], description="出现的年份列表(升序)")
+    platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据")
+    analysis_result: Dict[str, Any] = Field(default={}, description="市场分析结果(含分析文本与品牌分析表)")
+    pie_data: List[Dict[str, Any]] = Field(default=[], description="各平台品牌份额饼图数据")
 
 
 class GenerateReportOutput(BaseModel):

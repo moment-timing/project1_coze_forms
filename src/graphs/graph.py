@@ -2,9 +2,10 @@ from langgraph.graph import StateGraph, END
 
 from graphs.state import GlobalState, GraphInput, GraphOutput
 from graphs.nodes.parse_data_node import parse_data_node
+from graphs.nodes.analysis_node import analysis_node
 from graphs.nodes.generate_report_node import generate_report_node
 
-# 主图编排：解析数据 -> 生成Excel报告
+# 主图编排：解析数据 -> 市场数据分析 -> 生成Excel报告
 builder = StateGraph(
     GlobalState,
     input_schema=GraphInput,
@@ -12,10 +13,12 @@ builder = StateGraph(
 )
 
 builder.add_node("parse_data", parse_data_node)
+builder.add_node("analysis", analysis_node, metadata={"type": "agent", "llm_cfg": "config/analysis_llm_cfg.json"})
 builder.add_node("generate_report", generate_report_node)
 
 builder.set_entry_point("parse_data")
-builder.add_edge("parse_data", "generate_report")
+builder.add_edge("parse_data", "analysis")
+builder.add_edge("analysis", "generate_report")
 builder.add_edge("generate_report", END)
 
 main_graph = builder.compile()

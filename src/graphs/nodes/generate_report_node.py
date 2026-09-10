@@ -11,7 +11,7 @@ from coze_coding_dev_sdk.s3 import S3SyncStorage
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.chart import LineChart, Reference
+from openpyxl.chart import LineChart, PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.axis import ChartLines
 from openpyxl.chart.marker import Marker
@@ -405,6 +405,211 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
 
     anchor_row = table_last_row + 3
     ws.add_chart(chart, f"A{anchor_row}")
+    return anchor_row
+
+
+# =============================== 品牌分析：表格 + 饼图 + 小结 ==================================
+BRAND_COLS = 8
+BRAND_HEADERS = [
+    "目标产品", "平台", "类目", "品牌情况",
+    "集中度说明", "竞争情况", "目标产品类目占比", "切入难度",
+]
+BRAND_HEADER_FILL = "548235"
+_PIE_COLORS = ("4472C4", "ED7D31", "70AD47", "C00000", "7030A0", "00B0F0", "FFC000", "A6A6A6")
+
+
+def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row: int) -> int:
+    """写入品牌分析表格(8列)，返回表格末行行号。"""
+    # 标题行
+    ws.cell(start_row, 1, f"{shop_name} 品牌分析")
+    ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=BRAND_COLS)
+    for c in range(1, BRAND_COLS + 1):
+        ws.cell(start_row, c).fill = PatternFill("solid", fgColor=TITLE_FILL)
+    tc = ws.cell(start_row, 1)
+    tc.font = Font(size=14, bold=True, color="FFFFFF")
+    tc.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[start_row].height = 28
+
+    header_row = start_row + 1
+    for j, h in enumerate(BRAND_HEADERS, start=1):
+        cell = ws.cell(header_row, j, h)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor=BRAND_HEADER_FILL)
+        cell.alignment = CENTER
+    ws.row_dimensions[header_row].height = 24
+
+    first_body = header_row + 1
+    row = first_body
+    if not rows:
+        cell = ws.cell(row, 2, "暂无数据")
+        cell.alignment = CENTER
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=BRAND_COLS)
+        ws.row_dimensions[row].height = 22
+        row += 1
+    else:
+        n = len(rows)
+        for i, rdata in enumerate(rows):
+            values = [
+                str(rdata.get("目标产品", "")),
+                str(rdata.get("平台", "")),
+                str(rdata.get("类目", "")),
+                str(rdata.get("品牌情况", "")),
+                str(rdata.get("集中度说明", "")),
+                str(rdata.get("竞争情况", "")),
+                str(rdata.get("目标产品类目占比", "")),
+                str(rdata.get("切入难度", "")),
+            ]
+            for j, v in enumerate(values, start=1):
+                cell = ws.cell(row, j, v)
+                cell.alignment = CENTER if j in (1, 2, 7, 8) else LEFT_CENTER
+            ws.row_dimensions[row].height = 34
+            row += 1
+        # 合并目标产品列(覆盖全部行)
+        ws.merge_cells(start_row=first_body, start_column=1, end_row=row - 1, end_column=1)
+        shop_cell = ws.cell(first_body, 1, shop_name)
+        shop_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    if row - 1 >= header_row:
+        _apply_border(ws, header_row, row - 1, 1, BRAND_COLS)
+
+    # 列宽(品牌情况/竞争情况较宽)
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 10
+    ws.column_dimensions["C"].width = 24
+    ws.column_dimensions["D"].width = 38
+    ws.column_dimensions["E"].width = 26
+    ws.column_dimensions["F"].width = 38
+    ws.column_dimensions["G"].width = 16
+    ws.column_dimensions["H"].width = 12
+
+    return row - 1
+
+
+def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
+                      anchor_row: int, data_start_col: int, data_start_row: int) -> int:
+    """为每个平台生成品牌份额饼图(数据源写入隐藏列)，返回饼图区占用末行。"""
+    if not pie_data:
+        return anchor_row - 1
+
+    # 标题行
+    trow = anchor_row
+    ws.cell(trow, 1, f"{shop_name} 各平台品牌份额饼图")
+    ws.merge_cells(start_row=trow, start_column=1, end_row=trow, end_column=BRAND_COLS)
+    for c in range(1, BRAND_COLS + 1):
+        ws.cell(trow, c).fill = PatternFill("solid", fgColor=SUBTOTAL_FILL)
+    tt = ws.cell(trow, 1)
+    tt.font = Font(size=12, bold=True, color="1F4E79")
+    tt.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[trow].height = 22
+
+    chart_row = trow + 2
+    max_rows = 0
+    for k, item in enumerate(pie_data):
+        platform = str(item.get("平台", "平台"))
+        slices = item.get("slices", [])
+        if not isinstance(slices, list) or not slices:
+            continue
+        dcol = data_start_col + k * 2
+        n = len(slices)
+        # 数据源(隐藏列)：标题 + 品牌名/占比
+        ws.cell(data_start_row, dcol, "品牌")
+        ws.cell(data_start_row, dcol + 1, f"{platform}-占比")
+        for j, s in enumerate(slices):
+            if not isinstance(s, dict):
+                continue
+            ws.cell(data_start_row + 1 + j, dcol, str(s.get("品牌", "")))
+            pct = s.get("占比")
+            ws.cell(data_start_row + 1 + j, dcol + 1, round(float(pct) / 100.0, 6) if pct is not None else 0.0)
+        ws.cell(data_start_row + 1 + n, dcol, "合计")
+        ws.cell(data_start_row + 1 + n, dcol + 1, 1.0)
+
+        data = Reference(ws, min_col=dcol + 1, min_row=data_start_row + 1,
+                         max_col=dcol + 1, max_row=data_start_row + 1 + n)
+        cats = Reference(ws, min_col=dcol, min_row=data_start_row + 1,
+                         max_row=data_start_row + 1 + n)
+
+        pie = PieChart()
+        pie.title = f"{platform}品牌份额"
+        pie.style = 13
+        pie.add_data(data, titles_from_data=True)
+        pie.set_categories(cats)
+        pie.visible_cells_only = False
+        pie.dataLabels = DataLabelList()
+        pie.dataLabels.showPercent = True
+        pie.dataLabels.showVal = False
+        # 品牌名 + 占比标签
+        pie.height = 8
+        pie.width = 9
+        anchor_c = get_column_letter(1 + k * 6)
+        ws.add_chart(pie, f"{anchor_c}{chart_row}")
+        if n > max_rows:
+            max_rows = n
+
+    return chart_row + max_rows
+
+
+def _write_analysis_text(ws, analysis_result: Dict[str, Any], start_row: int) -> int:
+    """在品牌区域后写入市场分析报告文本(合并单元格换行)。"""
+    text = analysis_result.get("analysis_text") or "无数据"
+    if not isinstance(text, str):
+        text = str(text)
+
+    row = start_row
+    ws.cell(row, 1, "市场分析报告")
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=BRAND_COLS)
+    for c in range(1, BRAND_COLS + 1):
+        ws.cell(row, c).fill = PatternFill("solid", fgColor=SUBTOTAL_FILL)
+    tc = ws.cell(row, 1)
+    tc.font = Font(size=12, bold=True, color="1F4E79")
+    ws.row_dimensions[row].height = 22
+    row += 1
+
+    # 将文本按行写入
+    lines = text.splitlines()
+    if not lines:
+        lines = [text]
+    for ln in lines:
+        cell = ws.cell(row, 1, ln)
+        cell.alignment = LEFT_CENTER
+        cell.font = Font(size=10)
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=BRAND_COLS)
+        ws.row_dimensions[row].height = 24 if ln else 6
+        row += 1
+    return row
+
+
+def _write_brand_section(ws, shop_name: str, analysis_result: Dict[str, Any],
+                         pie_data: List[Dict[str, Any]], start_row: int) -> int:
+    """在折线图下方依次写入：品牌分析表格 + 饼图 + 饼图说明/数据来源/小结 + 分析报告文本。"""
+    rows = analysis_result.get("brand_table") or []
+    if not isinstance(rows, list):
+        rows = []
+
+    cur = start_row
+    table_last = _write_brand_table(ws, shop_name, rows, cur)
+    cur = table_last + 2
+
+    # 饼图数据源使用隐藏列(位于品牌表8列之后)
+    data_start_col = BRAND_COLS + 3  # 从 K 列开始
+    data_start_row = cur - 1
+    pie_bottom = _write_pie_charts(ws, pie_data, shop_name, cur, data_start_col, data_start_row)
+
+    # 饼图说明/数据来源/小结
+    note_row = max(cur, pie_bottom) + 2
+    summary = analysis_result.get("brand_summary") or "无数据"
+    if not isinstance(summary, str):
+        summary = str(summary)
+    for ln in summary.splitlines():
+        cell = ws.cell(note_row, 1, ln)
+        cell.font = Font(size=9, color="808080")
+        cell.alignment = LEFT_CENTER
+        ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=BRAND_COLS)
+        ws.row_dimensions[note_row].height = 18 if ln else 6
+        note_row += 1
+
+    # 分析报告文本
+    text_last = _write_analysis_text(ws, analysis_result, note_row + 1)
+    return text_last
 
 
 
@@ -434,6 +639,18 @@ def generate_report_node(
 
     src_col = n_cols + 3  # 数据源放在表格右侧空列，随后隐藏
     _build_chart(ws, shop_name, years, state.monthly_summary, table_last_row, n_cols, src_col)
+
+    # 折线图下方：品牌分析表格 + 饼图 + 小结 + 分析报告文本
+    # 折线图 anchor = table_last_row + 3，高14cm 约占26行，因此品牌区从其后约30行开始
+    chart_anchor = table_last_row + 3
+    brand_start = chart_anchor + 32
+    _write_brand_section(
+        ws,
+        shop_name,
+        state.analysis_result if isinstance(state.analysis_result, dict) else {},
+        state.pie_data if isinstance(state.pie_data, list) else [],
+        brand_start,
+    )
 
     local_dir = "/tmp"
     fname = f"sales_analysis_report_{int(time.time())}.xlsx"
