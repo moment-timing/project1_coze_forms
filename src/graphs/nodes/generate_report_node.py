@@ -73,6 +73,41 @@ def _build_monthly_by_year_wan(monthly: List[Dict[str, Any]], years: List[str]) 
             by_year[y][month - 1] = (float(v) / 10000.0) if v is not None else 0.0
     return by_year
 
+# -------------------------------- 折线关闭圆滑 ---------------------------------------------------
+  
+def _build_raw_and_chart_data(monthly: List[Dict[str, Any]], years: List[str]):
+    # 原始数据，全部是数字，用于Y轴max计算
+    by_year_raw: Dict[str, List[float]] = {y: [0.0] * 12 for y in years}
+    for m in monthly:
+        if not isinstance(m, dict):
+            continue
+        ym = str(m.get("月", ""))
+        if len(ym) < 6:
+            continue
+        y = ym[:4]
+        try:
+            month = int(ym[4:6])
+        except ValueError:
+            continue
+        if y in by_year_raw and 1 <= month <= 12:
+            v = m.get("销售额(元)")
+            by_year_raw[y][month - 1] = (float(v) / 10000.0) if v is not None else 0.0
+
+    # 生成图表数据：最后>0点之后全部置None，用于截断折线
+    by_year_chart: Dict[str, List[Optional[float]]] = {}
+    for year, data_list in by_year_raw.items():
+        chart_list: List[Optional[float]] = data_list.copy()
+        last_valid_idx = -1
+        for idx, num in enumerate(chart_list):
+            if num > 0:
+                last_valid_idx = idx
+        if last_valid_idx != -1:
+            for idx in range(last_valid_idx + 1, 12):
+                chart_list[idx] = None
+        by_year_chart[year] = chart_list
+    return by_year_raw, by_year_chart
+
+
 
 def _apply_border(ws, r1: int, r2: int, c1: int, c2: int) -> None:
     for r in range(r1, r2 + 1):
@@ -100,17 +135,34 @@ def _ceil_to(value: float, step: float) -> float:
         return value
     return math.ceil(value / step) * step
 
+# ------------------------- 折线关闭圆滑 ------------------------------------------
+# def _build_source_block(ws, years: List[str], monthly: List[Dict[str, Any]], src_col: int) -> None:
+#     """在指定起始列写入折线图的数据源(单位为万元)，月份为01-12。"""
+#     ws.cell(1, src_col, "月份")
+#     for i, y in enumerate(years):
+#         ws.cell(1, src_col + 1 + i, y)
+#     by_year = _build_monthly_by_year_wan(monthly, years)
+#     for m in range(1, 13):
+#         ws.cell(1 + m, src_col, f"{m:02d}")
+#         for i, y in enumerate(years):
+#             ws.cell(1 + m, src_col + 1 + i, round(by_year[y][m - 1], 2))
 
-def _build_source_block(ws, years: List[str], monthly: List[Dict[str, Any]], src_col: int) -> None:
-    """在指定起始列写入折线图的数据源(单位为万元)，月份为01-12。"""
+def _build_source_block(ws, years: List[str], monthly: List[Dict[str, Any]], src_col: int) -> Dict[str, List[float]]:
+    """写入折线图数据源，返回原始by_year_raw（用于坐标轴计算）"""
     ws.cell(1, src_col, "月份")
     for i, y in enumerate(years):
         ws.cell(1, src_col + 1 + i, y)
-    by_year = _build_monthly_by_year_wan(monthly, years)
+    by_year_raw, by_year_chart = _build_raw_and_chart_data(monthly, years)
+
     for m in range(1, 13):
         ws.cell(1 + m, src_col, f"{m:02d}")
         for i, y in enumerate(years):
-            ws.cell(1 + m, src_col + 1 + i, round(by_year[y][m - 1], 2))
+            val = by_year_chart[y][m - 1]
+            if val is not None:
+                ws.cell(1 + m, src_col + 1 + i, round(val, 2))
+            else:
+                ws.cell(1 + m, src_col + 1 + i, None)
+    return by_year_raw
 
 
 def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categories: List[CategoryData]) -> int:
@@ -269,7 +321,10 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
                  table_last_row: int, n_cols: int, src_col: int) -> None:
     """在表格下方构建折线图：x轴为01-12月份，每条折线代表一个年份(单位万元)，刻度清晰标注。"""
     # 写入图表数据源(万元)，并隐藏
-    _build_source_block(ws, years, monthly, src_col)
+    # _build_source_block(ws, years, monthly, src_col)
+    # ------------------------------ 关闭折线圆滑  ----------------------------------------------------------------
+    by_year_raw = _build_source_block(ws, years, monthly, src_col)
+
     for i in range(len(years) + 1):
         ws.column_dimensions[get_column_letter(src_col + i)].hidden = True
 
@@ -279,7 +334,7 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
     # 图表与表格同宽：按表格各列宽估算像素再换算为厘米
     col_chars = COL_WIDTHS["A"] + COL_WIDTHS["B"] + COL_WIDTHS["C"] + YEAR_COL_W * len(years) + GROWTH_COL_W
     chart.width = int(col_chars * 7.0 / 96.0 * 2.54)
-    chart.height = 12
+    chart.height = 14  # 加高图表
 
     data = Reference(ws, min_col=src_col + 1, min_row=1, max_col=src_col + len(years), max_row=13)
     cats = Reference(ws, min_col=src_col, min_row=2, max_row=13)
@@ -295,6 +350,8 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
         color = _line_colors[idx % len(_line_colors)]
         ser.graphicalProperties.line.solidFill = color
         ser.graphicalProperties.line.width = 20000  # 约2pt
+      # -------------------------------------  关闭折线圆滑  -----------------------------------
+        ser.smooth = False  # 新增：直线折线，取消弯曲平滑
         mk = Marker(symbol="circle", size=7)
         mk.graphicalProperties.solidFill = color
         mk.graphicalProperties.line.solidFill = color
@@ -312,27 +369,44 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
     chart.x_axis.majorGridlines = ChartLines()
     chart.y_axis.majorGridlines = ChartLines()
 
-    # 统计最大值以获得清晰Y轴刻度(从0开始，向上取整)
+        # 统计最大值以获得清晰Y轴刻度(从0开始，向上取整)
+    # maxv = 1.0
+    # by_year = _build_monthly_by_year_wan(monthly, years)
+    # for y in years:
+    #     m = max(by_year[y]) if by_year[y] else 0.0
+    #     if m > maxv:
+    #         maxv = m
+    #     _step = _nice_step(maxv)
+    # -------------------------- 关闭折线圆滑 ----------------------------
     maxv = 1.0
-    by_year = _build_monthly_by_year_wan(monthly, years)
     for y in years:
-        m = max(by_year[y]) if by_year[y] else 0.0
+        valid_nums = [x for x in by_year_raw[y] if x > 0]
+        m = max(valid_nums) if valid_nums else 0.0
         if m > maxv:
             maxv = m
     _step = _nice_step(maxv)
+
     chart.y_axis.scaling.min = 0
     chart.y_axis.majorUnit = _step
     chart.y_axis.scaling.max = _ceil_to(maxv, _step)
-
-    # 数据点数值标注(万元)，刻度标清楚
+    # ===== 全部标签关闭：数值、类别、系列名 =====
+        # ===== 全部标签关闭：数值、类别、系列名 =====
     chart.dataLabels = DataLabelList()
-    chart.dataLabels.showVal = True
-    chart.dataLabels.numFmt = '#,##0"万"'
-    chart.dataLabels.dLblPos = "t"  # 数值显示在数据点上方
+    chart.dataLabels.showVal = False
+    chart.dataLabels.showCatName = False
+    chart.dataLabels.showSerName = False
 
+    # 图例放在图表底部，不遮挡折线
     chart.legend.position = "b"
+    chart.legend.overlay = False
+
+    # 图表加高一点，给图例留出空间
+    chart.height = 14
+
     anchor_row = table_last_row + 3
     ws.add_chart(chart, f"A{anchor_row}")
+
+
 
 
 def generate_report_node(
