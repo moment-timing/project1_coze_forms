@@ -1,6 +1,7 @@
 import os
 import time
 import math
+import re
 from typing import Dict, List, Any, Optional
 
 from langchain_core.runnables import RunnableConfig
@@ -29,11 +30,59 @@ LEFT_CENTER = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
 # 表格行高 / 列宽(自适应，避免数据被遮盖)
 HEADER_ROW_H = 24
-BODY_ROW_H = 22
+BODY_ROW_H = 30
 TITLE_ROW_H = 32
-COL_WIDTHS = {"A": 18, "B": 12, "C": 58}
+COL_WIDTHS = {"A": 18, "B": 12, "C": 68}
 YEAR_COL_W = 16
 GROWTH_COL_W = 13
+
+# ============ 可手动调节的行高/列宽系数(推荐先改这里即可调整体排版) ============
+ROW_H_SCALE = 1.0      # 行高整体缩放系数(如文字仍被遮挡可调至 1.1~1.3)
+COL_W_SCALE = 1.0      # 列宽整体缩放系数(如拼音太挤可调至 1.1~1.2)
+LINE_H = 15.0          # 单行文字基线高度(磅)，与字号联动
+MIN_ROW_H = 20.0       # 最小行高(磅)
+CH_PER_UNIT = 2.0      # 一列宽单位可容纳的显示宽度(中文按2计)
+# 品牌分析区列宽(可手动微调；最终会再乘 COL_W_SCALE)
+BRAND_COL_WIDTHS = {"A": 14, "B": 10, "C": 28, "D": 26, "E": 26, "F": 34, "G": 18, "H": 12}
+# 饼图区参数
+PIE_SPACING = 9        # 相邻饼图间隔列数(避免覆盖)
+PIE_WIDTH = 6.5        # 饼图宽度(cm)
+PIE_HEIGHT = 6.0       # 饼图高度(cm)
+PIE_H_ROWS = 14        # 饼图占用行数(由高度估算，用于文字避让)
+
+# 行高/列宽可整体调节系数(内容换行后按需放大，手动微调请改这里)
+ROW_H_SCALE = 1.0      # 行高整体缩放(>1 放大，<1 缩小)
+COL_W_SCALE = 1.0      # 列宽整体缩放
+LINE_H = 15.0          # 单行文字基准高度(磅)
+
+
+def _disp_width(s: Any) -> float:
+    """估算文本的显示宽度(中文/全角按2单位，其余按1)。"""
+    if s is None:
+        return 0.0
+    return float(sum(2.0 if ord(ch) > 0x2E7F else 1.0 for ch in str(s)))
+
+
+def _calc_lines(s: Any, merged_chars: float) -> int:
+    """估算一段文本在指定列宽(字符单位)下换行后占用的行数(含显式换行)。"""
+    text = "" if s is None else str(s)
+    if not text:
+        return 1
+    per_line = max(4.0, float(merged_chars) - 2.0)
+    total = 0
+    for seg in str(text).split("\n"):
+        total += max(1, math.ceil(_disp_width(seg) / per_line))
+    return max(1, total)
+
+
+def _auto_height(ws, row: int, values: List[Any], merged_chars: float) -> None:
+    """根据单元格内容自动计算行高，解决文字被遮挡问题。"""
+    lines = 1
+    for v in values:
+        lines = max(lines, _calc_lines(v, merged_chars))
+    ws.row_dimensions[row].height = max(20.0, lines * LINE_H * ROW_H_SCALE + 6.0)
+
+
 
 
 def _gmv_for(agg_year: List[Dict[str, Any]], year: str) -> float:
@@ -418,8 +467,34 @@ BRAND_HEADER_FILL = "548235"
 _PIE_COLORS = ("4472C4", "ED7D31", "70AD47", "C00000", "7030A0", "00B0F0", "FFC000", "A6A6A6")
 
 
+
+
+
+def _row_h(*text_col: Any) -> float:
+    """根据多个 (文本,列宽) 计算该行需要的高度(磅)。"""
+    need = 1
+    for text, w in text_col:
+        need = max(need, _calc_lines(text, w))
+    h = need * LINE_H * ROW_H_SCALE + 4.0
+    return max(MIN_ROW_H, h)
+
+
+def _set_auto_row(ws, row: int, col_widths: Dict[str, float],
+                  *cell_texts: Any) -> None:
+    """按单元格内容自动设置第 row 行行高。cell_texts 顺序对应 1..N 列。"""
+    pairs = []
+    for idx, text in enumerate(cell_texts, start=1):
+        w = float(col_widths.get(get_column_letter(idx), 12.0))
+        pairs.append((text, w))
+    ws.row_dimensions[row].height = _row_h(*pairs)
+
+
 def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row: int) -> int:
     """写入品牌分析表格(8列)，返回表格末行行号。"""
+    # 应用品牌列宽度(含整体缩放系数)
+    for col, w in BRAND_COL_WIDTHS.items():
+        ws.column_dimensions[col].width = round(w * COL_W_SCALE, 2)
+
     # 标题行
     ws.cell(start_row, 1, f"{shop_name} 品牌分析")
     ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=BRAND_COLS)
@@ -428,7 +503,7 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
     tc = ws.cell(start_row, 1)
     tc.font = Font(size=14, bold=True, color="FFFFFF")
     tc.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[start_row].height = 28
+    ws.row_dimensions[start_row].height = _row_h((f"{shop_name} 品牌分析", sum(BRAND_COL_WIDTHS.values())))
 
     header_row = start_row + 1
     for j, h in enumerate(BRAND_HEADERS, start=1):
@@ -436,7 +511,7 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor=BRAND_HEADER_FILL)
         cell.alignment = CENTER
-    ws.row_dimensions[header_row].height = 24
+    ws.row_dimensions[header_row].height = max(24, _row_h(*[(h, BRAND_COL_WIDTHS[get_column_letter(i)]) for i, h in enumerate(BRAND_HEADERS, start=1)]))
 
     first_body = header_row + 1
     row = first_body
@@ -447,8 +522,7 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
         ws.row_dimensions[row].height = 22
         row += 1
     else:
-        n = len(rows)
-        for i, rdata in enumerate(rows):
+        for rdata in rows:
             values = [
                 str(rdata.get("目标产品", "")),
                 str(rdata.get("平台", "")),
@@ -462,7 +536,10 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
             for j, v in enumerate(values, start=1):
                 cell = ws.cell(row, j, v)
                 cell.alignment = CENTER if j in (1, 2, 7, 8) else LEFT_CENTER
-            ws.row_dimensions[row].height = 34
+            # 行高根据各列内容(含换行)自动计算
+            ws.row_dimensions[row].height = _row_h(*[
+                (values[i], BRAND_COL_WIDTHS[get_column_letter(i + 1)]) for i in range(BRAND_COLS)
+            ])
             row += 1
         # 合并目标产品列(覆盖全部行)
         ws.merge_cells(start_row=first_body, start_column=1, end_row=row - 1, end_column=1)
@@ -471,16 +548,6 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
 
     if row - 1 >= header_row:
         _apply_border(ws, header_row, row - 1, 1, BRAND_COLS)
-
-    # 列宽(品牌情况/竞争情况较宽)
-    ws.column_dimensions["A"].width = 14
-    ws.column_dimensions["B"].width = 10
-    ws.column_dimensions["C"].width = 24
-    ws.column_dimensions["D"].width = 38
-    ws.column_dimensions["E"].width = 26
-    ws.column_dimensions["F"].width = 38
-    ws.column_dimensions["G"].width = 16
-    ws.column_dimensions["H"].width = 12
 
     return row - 1
 
@@ -504,48 +571,54 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
 
     chart_row = trow + 2
     max_rows = 0
-    for k, item in enumerate(pie_data):
+    drawn = 0
+    for item in pie_data:
         platform = str(item.get("平台", "平台"))
         slices = item.get("slices", [])
-        if not isinstance(slices, list) or not slices:
+        if not isinstance(slices, list):
+            slices = []
+        valid = [s for s in slices if isinstance(s, dict)]
+        if not valid:
             continue
-        dcol = data_start_col + k * 2
-        n = len(slices)
-        # 数据源(隐藏列)：标题 + 品牌名/占比
+        # 仅使用第 6 个及之后的长尾品牌不展示，防止标签混乱
+        n = len(valid)
+        dcol = data_start_col + drawn * 2
+        # 数据源(隐藏列)：品牌名 + 销售额数值(直接用销售额画饼图，保证占比真实)
         ws.cell(data_start_row, dcol, "品牌")
-        ws.cell(data_start_row, dcol + 1, f"{platform}-占比")
-        for j, s in enumerate(slices):
-            if not isinstance(s, dict):
-                continue
+        ws.cell(data_start_row, dcol + 1, f"{platform}-销售额(元)")
+        for j, s in enumerate(valid):
+            if j >= 40:
+                break
             ws.cell(data_start_row + 1 + j, dcol, str(s.get("品牌", "")))
-            pct = s.get("占比")
-            ws.cell(data_start_row + 1 + j, dcol + 1, round(float(pct) / 100.0, 6) if pct is not None else 0.0)
-        ws.cell(data_start_row + 1 + n, dcol, "合计")
-        ws.cell(data_start_row + 1 + n, dcol + 1, 1.0)
+            val = s.get("销售额(元)")
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                val = 0.0
+            ws.cell(data_start_row + 1 + j, dcol + 1, float(val))
 
         data = Reference(ws, min_col=dcol + 1, min_row=data_start_row + 1,
-                         max_col=dcol + 1, max_row=data_start_row + 1 + n)
+                         max_col=dcol + 1, max_row=data_start_row + n)
         cats = Reference(ws, min_col=dcol, min_row=data_start_row + 1,
-                         max_row=data_start_row + 1 + n)
+                         max_row=data_start_row + n)
 
         pie = PieChart()
         pie.title = f"{platform}品牌份额"
         pie.style = 13
-        pie.add_data(data, titles_from_data=True)
+        pie.add_data(data, titles_from_data=False)  # 不按首行当标题，避免错位
         pie.set_categories(cats)
         pie.visible_cells_only = False
         pie.dataLabels = DataLabelList()
         pie.dataLabels.showPercent = True
         pie.dataLabels.showVal = False
-        # 品牌名 + 占比标签
-        pie.height = 8
-        pie.width = 9
-        anchor_c = get_column_letter(1 + k * 6)
+        pie.height = max(1, int(round(PIE_HEIGHT)))
+        pie.width = max(1, int(round(PIE_WIDTH)))
+        anchor_c = get_column_letter(1 + drawn * PIE_SPACING)
         ws.add_chart(pie, f"{anchor_c}{chart_row}")
+        drawn += 1
         if n > max_rows:
             max_rows = n
 
-    return chart_row + max_rows
+    # 饼图底部预留 PIE_H_ROWS 行，避免后续“说明/小结”文字被图表遮挡
+    return chart_row + PIE_H_ROWS
 
 
 def _write_analysis_text(ws, analysis_result: Dict[str, Any], start_row: int) -> int:
@@ -564,18 +637,43 @@ def _write_analysis_text(ws, analysis_result: Dict[str, Any], start_row: int) ->
     ws.row_dimensions[row].height = 22
     row += 1
 
-    # 将文本按行写入
+    # 将文本按行写入(标题加粗调大、去除 markdown 符号)
+    merged_w = sum(BRAND_COL_WIDTHS.values()) * COL_W_SCALE
     lines = text.splitlines()
     if not lines:
         lines = [text]
     for ln in lines:
-        cell = ws.cell(row, 1, ln)
+        clean = _strip_md(ln)
+        is_head = _is_heading(clean)
+        cell = ws.cell(row, 1, clean)
         cell.alignment = LEFT_CENTER
-        cell.font = Font(size=10)
+        cell.font = Font(size=12, bold=True, color="1F4E79") if is_head else Font(size=10)
+        if not clean:
+            cell.font = Font(size=4)
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=BRAND_COLS)
-        ws.row_dimensions[row].height = 24 if ln else 6
+        need = _calc_lines(clean, merged_w)
+        ws.row_dimensions[row].height = 7 if not clean else max(18 if not is_head else 22, need * LINE_H * ROW_H_SCALE)
         row += 1
     return row
+
+
+def _strip_md(s: str) -> str:
+    """去除常见的 markdown 符号(# * _ ` 及首尾空白)，避免在 Excel 中显示乱码。"""
+    if s is None:
+        return ""
+    return re.sub(r"[#*_`>~]", "", s).strip()
+
+
+def _is_heading(ln: str) -> bool:
+    """判断一行是否为章节标题(如‘一、年度维度分析’)。"""
+    s = (ln or "").strip()
+    if not s:
+        return False
+    if re.match(r"^[一二三四五六七八九十]+[、.．\s]", s):
+        return True
+    if re.match(r"^\d+[、.．\s]", s):
+        return True
+    return any(k in s for k in ("维度分析", "平台表现", "品牌格局", "市场分析报告", "开篇", "总结", "结论", "摘要"))
 
 
 def _write_brand_section(ws, shop_name: str, analysis_result: Dict[str, Any],
@@ -589,22 +687,25 @@ def _write_brand_section(ws, shop_name: str, analysis_result: Dict[str, Any],
     table_last = _write_brand_table(ws, shop_name, rows, cur)
     cur = table_last + 2
 
-    # 饼图数据源使用隐藏列(位于品牌表8列之后)
-    data_start_col = BRAND_COLS + 3  # 从 K 列开始
+    # 饼图数据源使用隐藏列(放得很靠右，避免与饼图/表格/说明文字互相遮挡)
+    data_start_col = 30  # AD 列起，远离饼图与表格区域
     data_start_row = cur - 1
     pie_bottom = _write_pie_charts(ws, pie_data, shop_name, cur, data_start_col, data_start_row)
 
-    # 饼图说明/数据来源/小结
+    # 饼图说明/数据来源/小结(自动避让饼图占区)
+    merged_w = sum(BRAND_COL_WIDTHS.values()) * COL_W_SCALE
     note_row = max(cur, pie_bottom) + 2
     summary = analysis_result.get("brand_summary") or "无数据"
     if not isinstance(summary, str):
         summary = str(summary)
     for ln in summary.splitlines():
-        cell = ws.cell(note_row, 1, ln)
-        cell.font = Font(size=9, color="808080")
+        clean = _strip_md(ln)
+        cell = ws.cell(note_row, 1, clean)
+        cell.font = Font(size=9, color="595959")
         cell.alignment = LEFT_CENTER
         ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=BRAND_COLS)
-        ws.row_dimensions[note_row].height = 18 if ln else 6
+        need = _calc_lines(clean, merged_w)
+        ws.row_dimensions[note_row].height = 6 if not clean else max(18, need * LINE_H * 0.9 * ROW_H_SCALE)
         note_row += 1
 
     # 分析报告文本
@@ -675,3 +776,6 @@ def generate_report_node(
     url = storage.generate_presigned_url(key=key, expire_time=2592000)
 
     return GenerateReportOutput(report_key=key, report_url=url)
+
+
+
