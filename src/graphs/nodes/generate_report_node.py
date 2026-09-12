@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.chart import LineChart, PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.axis import ChartLines
-from openpyxl.chart.marker import Marker
+from openpyxl.chart.marker import Marker, DataPoint
 
 from graphs.state import GenerateReportInput, GenerateReportOutput, CategoryData
 
@@ -43,12 +43,12 @@ LINE_H = 15.0          # 单行文字基线高度(磅)，与字号联动
 MIN_ROW_H = 20.0       # 最小行高(磅)
 CH_PER_UNIT = 2.0      # 一列宽单位可容纳的显示宽度(中文按2计)
 # 品牌分析区列宽(可手动微调；最终会再乘 COL_W_SCALE)
-BRAND_COL_WIDTHS = {"A": 14, "B": 10, "C": 28, "D": 26, "E": 26, "F": 34, "G": 18, "H": 12}
+BRAND_COL_WIDTHS = {"A": 18, "B": 12, "C": 34, "D": 18, "E": 18, "F": 18, "G": 18, "H": 12}
 # 饼图区参数
-PIE_SPACING = 9        # 相邻饼图间隔列数(避免覆盖)
-PIE_WIDTH = 6.5        # 饼图宽度(cm)
-PIE_HEIGHT = 6.0       # 饼图高度(cm)
-PIE_H_ROWS = 14        # 饼图占用行数(由高度估算，用于文字避让)
+PIE_SPACING = 6        # 相邻饼图间隔列数(避免覆盖)
+PIE_WIDTH = 5.5        # 饼图宽度(cm)
+PIE_HEIGHT = 5.5       # 饼图高度(cm)
+PIE_H_ROWS = 13        # 饼图占用行数(由高度估算，用于文字避让)
 
 # 行高/列宽可整体调节系数(内容换行后按需放大，手动微调请改这里)
 ROW_H_SCALE = 1.0      # 行高整体缩放(>1 放大，<1 缩小)
@@ -611,6 +611,13 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
         pie.dataLabels.showVal = False
         pie.height = max(1, int(round(PIE_HEIGHT)))
         pie.width = max(1, int(round(PIE_WIDTH)))
+        # 每个扇区设置易区分的颜色(避免各平台颜色相近/相同)
+        _pts = []
+        for _j in range(n):
+            _dp = DataPoint(idx=_j)
+            _dp.spPr.solidFill = _PIE_COLORS[_j % len(_PIE_COLORS)]
+            _pts.append(_dp)
+        pie.series[0].data_points = _pts
         anchor_c = get_column_letter(1 + drawn * PIE_SPACING)
         ws.add_chart(pie, f"{anchor_c}{chart_row}")
         drawn += 1
@@ -673,7 +680,9 @@ def _is_heading(ln: str) -> bool:
         return True
     if re.match(r"^\d+[、.．\s]", s):
         return True
-    return any(k in s for k in ("维度分析", "平台表现", "品牌格局", "市场分析报告", "开篇", "总结", "结论", "摘要"))
+    return any(k in s for k in ("维度分析", "平台表现", "品牌格局", "市场分析报告", "开篇",
+                                "总结", "结论", "摘要", "建议", "机会点", "机会", "趋势", "核心增长",
+                                "萎缩", "均价变化", "开篇一句话"))
 
 
 def _write_brand_section(ws, shop_name: str, analysis_result: Dict[str, Any],

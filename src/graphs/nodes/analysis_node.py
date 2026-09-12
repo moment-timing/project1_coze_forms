@@ -222,38 +222,31 @@ def _build_brand_analysis(
             f"市场{_conc_level(cr3, hhi)}",
         ])
 
-        # 类目取该平台对应类目名
+        # 类目取该平台对应类目名；若存在多个类目则分开成多行显示(不在同一格合并)
         cat_names = [c.category_name for c in categories if c.platform == plat]
-        cat_display = "、".join(cat_names) if cat_names else "全品类"
+        if not cat_names:
+            cat_names = ["全品类"]
 
-        table_rows.append({
-            "目标产品": shop_name,
-            "平台": plat,
-            "类目": cat_display,
-            "品牌情况": brand_desc,
-            "集中度说明": concentration,
-            "竞争情况": comp,
-            "目标产品类目占比": "100.00%",
-            "切入难度": _farm_level(shares[0]["占比"], hhi),
-        })
-
-        # 饼图数据：每个平台按品牌销售额做饼图；为保证可读性，超出前5名的长尾品牌合并进“其他Other”
+        # 饼图数据：每个平台按品牌销售额做饼图，brand_list 里有几个品牌就画几个(含其他Other)，不做长尾合并
         slices_sorted = sorted(shares, key=lambda x: x["销售额(元)"], reverse=True)
-        keep = slices_sorted[:5]
-        tail = slices_sorted[5:]
-        pie_slices = [{"品牌": s["品牌"], "销售额(元)": s["销售额(元)"], "占比": s["占比"]} for s in keep]
-        if tail:
-            tsum = float(sum(s["销售额(元)"] for s in tail))
-            tlist = [s["品牌"] for s in tail]
-            pie_slices.append({
-                "品牌": "其他Other（长尾）",
-                "销售额(元)": tsum,
-                "占比": tsum / total * 100.0,
-            })
+        pie_slices = [{"品牌": s["品牌"], "销售额(元)": s["销售额(元)"], "占比": s["占比"]} for s in slices_sorted]
         pie_data.append({"平台": plat, "slices": pie_slices})
         pie_notes.append(
             f"{plat}：头部品牌{shares[0]['品牌']}占比{shares[0]['占比']:.2f}%，CR3={cr3:.2f}%，市场{_conc_level(cr3, hhi)}。"
         )
+
+        # 品牌分析表：每个类目单独一行显示(类目列不合并多值)
+        for cat_name in cat_names:
+            table_rows.append({
+                "目标产品": shop_name,
+                "平台": plat,
+                "类目": cat_name,
+                "品牌情况": brand_desc,
+                "集中度说明": concentration,
+                "竞争情况": comp,
+                "目标产品类目占比": "100.00%",
+                "切入难度": _farm_level(shares[0]["占比"], hhi),
+            })
 
     if not table_rows:
         return {
@@ -264,7 +257,7 @@ def _build_brand_analysis(
         }
 
     summary = (
-        "饼图说明：每个平台对应一张品牌份额饼图，头部品牌用独立色块表示，长尾品牌已合并归入【其他 Other】。\n"
+        "饼图说明：每个平台对应一张品牌份额饼图，brand_list 中的品牌按销售额全部画出，头部品牌用独立色块表示。\n"
         "数据来源：各平台品类分品牌聚合数据（platform_brand_summary）。\n"
         "小结：" + "；".join(pie_notes) +
         " 整体品牌集中度较高，切入时建议聚焦细分差异与价格带运营。"
