@@ -16,6 +16,8 @@ from openpyxl.chart import LineChart, PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.axis import ChartLines
 from openpyxl.chart.marker import Marker, DataPoint
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 
 from graphs.state import GenerateReportInput, GenerateReportOutput, CategoryData
 
@@ -32,7 +34,16 @@ LEFT_CENTER = Alignment(horizontal="left", vertical="center", wrap_text=True)
 HEADER_ROW_H = 24
 BODY_ROW_H = 30
 TITLE_ROW_H = 32
-COL_WIDTHS = {"A": 18, "B": 12, "C": 68}
+HEAD_FONT = Font(size=13, bold=True, color="1F4E79")  # 分析章节标题样式(加粗+着色)
+
+# 已知的分析章节标题标签(用于识别内联标题，如 核心机会点：正文)
+_HEAD_LABELS = (
+    "核心机会点", "核心风险点", "机会点", "风险点", "品牌格局", "市场分析报告",
+    "综合结论与洞察", "综合结论", "总结", "结论", "摘要", "洞察", "开篇",
+    "年度维度分析", "季度维度分析", "月度维度分析", "平台表现与品牌格局分析",
+    "大盘趋势分析", "趋势分析", "建议", "总体概述", "现状",
+)
+COL_WIDTHS = {"A": 18, "B": 15, "C": 68}
 YEAR_COL_W = 16
 GROWTH_COL_W = 13
 
@@ -45,10 +56,10 @@ CH_PER_UNIT = 2.0      # 一列宽单位可容纳的显示宽度(中文按2计)
 # 品牌分析区列宽(可手动微调；最终会再乘 COL_W_SCALE)
 BRAND_COL_WIDTHS = {"A": 18, "B": 12, "C": 34, "D": 18, "E": 18, "F": 18, "G": 18, "H": 12}
 # 饼图区参数
-PIE_SPACING = 6        # 相邻饼图间隔列数(避免覆盖)
-PIE_WIDTH = 5.5        # 饼图宽度(cm)
-PIE_HEIGHT = 5.5       # 饼图高度(cm)
-PIE_H_ROWS = 13        # 饼图占用行数(由高度估算，用于文字避让)
+PIE_SPACING = 2        # 相邻饼图间隔列数(过大会导致三个饼图相距过远)
+PIE_WIDTH = 5.2        # 饼图宽度(cm)
+PIE_HEIGHT = 5.2       # 饼图高度(cm)
+PIE_H_ROWS = 12        # 饼图占用行数(由高度估算，用于文字避让)
 
 # 行高/列宽可整体调节系数(内容换行后按需放大，手动微调请改这里)
 ROW_H_SCALE = 1.0      # 行高整体缩放(>1 放大，<1 缩小)
@@ -522,6 +533,8 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
         ws.row_dimensions[row].height = 22
         row += 1
     else:
+        # 记录每一行的平台值，用于同平台合并
+        plat_values: List[str] = []
         for rdata in rows:
             values = [
                 str(rdata.get("目标产品", "")),
@@ -533,6 +546,7 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
                 str(rdata.get("目标产品类目占比", "")),
                 str(rdata.get("切入难度", "")),
             ]
+            plat_values.append(values[1])
             for j, v in enumerate(values, start=1):
                 cell = ws.cell(row, j, v)
                 cell.alignment = CENTER if j in (1, 2, 7, 8) else LEFT_CENTER
@@ -545,6 +559,22 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
         ws.merge_cells(start_row=first_body, start_column=1, end_row=row - 1, end_column=1)
         shop_cell = ws.cell(first_body, 1, shop_name)
         shop_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        # 同平台平台列合并显示(类目列隔开，保留每行)
+        i = 0
+        body_end = row - 1
+        while i < len(plat_values):
+            pv = plat_values[i]
+            start_idx = i
+            while i + 1 < len(plat_values) and plat_values[i + 1] == pv:
+                i += 1
+            end_idx = i
+            if end_idx > start_idx:
+                ws.merge_cells(start_row=first_body + start_idx, start_column=2,
+                               end_row=first_body + end_idx, end_column=2)
+                pc = ws.cell(first_body + start_idx, 2)
+                pc.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            i += 1
 
     if row - 1 >= header_row:
         _apply_border(ws, header_row, row - 1, 1, BRAND_COLS)
@@ -644,22 +674,42 @@ def _write_analysis_text(ws, analysis_result: Dict[str, Any], start_row: int) ->
     ws.row_dimensions[row].height = 22
     row += 1
 
-    # 将文本按行写入(标题加粗调大、去除 markdown 符号)
+    # 将文本按行写入(标题加粗调大、去除 markdown 符号；正文正常展示，不整体处理)
     merged_w = sum(BRAND_COL_WIDTHS.values()) * COL_W_SCALE
     lines = text.splitlines()
     if not lines:
         lines = [text]
     for ln in lines:
         clean = _strip_md(ln)
-        is_head = _is_heading(clean)
-        cell = ws.cell(row, 1, clean)
+        cell = ws.cell(row, 1)
         cell.alignment = LEFT_CENTER
-        cell.font = Font(size=12, bold=True, color="1F4E79") if is_head else Font(size=10)
-        if not clean:
-            cell.font = Font(size=4)
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=BRAND_COLS)
         need = _calc_lines(clean, merged_w)
-        ws.row_dimensions[row].height = 7 if not clean else max(18 if not is_head else 22, need * LINE_H * ROW_H_SCALE)
+        body_h = need * LINE_H * ROW_H_SCALE
+        if not clean:
+            cell.value = ""
+            cell.font = Font(size=4)
+            ws.row_dimensions[row].height = 6
+            row += 1
+            continue
+        label, tail = _heading_split(clean)
+        if label and tail is None:
+            # 独立章节标题：整行加粗 + 着色
+            cell.value = label
+            cell.font = HEAD_FONT
+            ws.row_dimensions[row].height = max(24, body_h + 6)
+        elif label and isinstance(tail, str) and tail.strip():
+            # 内联标题：标签加粗着色，正文保持默认样式
+            cell.value = CellRichText([
+                TextBlock(InlineFont(size=13, bold=True, color="1F4E79"), label),
+                TextBlock(InlineFont(size=10), tail),
+            ])
+            ws.row_dimensions[row].height = max(18, body_h + 4)
+        else:
+            # 正文：正常展示，不整体处理；长内容按需换行，行高充足避免被遮挡
+            cell.value = clean
+            cell.font = Font(size=10)
+            ws.row_dimensions[row].height = max(18, body_h + 4)
         row += 1
     return row
 
@@ -671,18 +721,23 @@ def _strip_md(s: str) -> str:
     return re.sub(r"[#*_`>~]", "", s).strip()
 
 
-def _is_heading(ln: str) -> bool:
-    """判断一行是否为章节标题(如‘一、年度维度分析’)。"""
+def _heading_split(ln: str):
+    """拆分内联标题：若行内有‘标签：正文’，返回 (label, tail)；
+    若为独立标题或非标题，返回 (None, None) 以便上层区分。"""
     s = (ln or "").strip()
     if not s:
-        return False
-    if re.match(r"^[一二三四五六七八九十]+[、.．\s]", s):
-        return True
-    if re.match(r"^\d+[、.．\s]", s):
-        return True
-    return any(k in s for k in ("维度分析", "平台表现", "品牌格局", "市场分析报告", "开篇",
-                                "总结", "结论", "摘要", "建议", "机会点", "机会", "趋势", "核心增长",
-                                "萎缩", "均价变化", "开篇一句话"))
+        return None, None
+    # 独立章节标题：整行即标题
+    if re.match(r"^[一二三四五六七八九十]+[、.．][^：:]{0,24}$", s):
+        return s, None
+    # 已知标签开头
+    for lab in _HEAD_LABELS:
+        if s.startswith(lab):
+            tail = s[len(lab):]
+            if tail.strip() in ("", "：", ":", "、", "。"):
+                return lab, None
+            return lab, tail
+    return None, None
 
 
 def _write_brand_section(ws, shop_name: str, analysis_result: Dict[str, Any],
