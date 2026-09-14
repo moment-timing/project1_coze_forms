@@ -43,7 +43,7 @@ _HEAD_LABELS = (
     "年度维度分析", "季度维度分析", "月度维度分析", "平台表现与品牌格局分析",
     "大盘趋势分析", "趋势分析", "建议", "总体概述", "现状",
 )
-COL_WIDTHS = {"A": 18, "B": 15, "C": 68}
+COL_WIDTHS = {"A": 20, "B": 18, "C": 70}
 YEAR_COL_W = 16
 GROWTH_COL_W = 13
 
@@ -54,17 +54,19 @@ LINE_H = 15.0          # 单行文字基线高度(磅)，与字号联动
 MIN_ROW_H = 20.0       # 最小行高(磅)
 CH_PER_UNIT = 2.0      # 一列宽单位可容纳的显示宽度(中文按2计)
 # 品牌分析区列宽(可手动微调；最终会再乘 COL_W_SCALE)
-BRAND_COL_WIDTHS = {"A": 18, "B": 12, "C": 34, "D": 18, "E": 18, "F": 18, "G": 18, "H": 12}
+BRAND_COL_WIDTHS = {"A": 20, "B": 18, "C": 38, "D": 18, "E": 18, "F": 18, "G": 18, "H": 12}
 # 饼图区参数
 PIE_SPACING = 2        # 相邻饼图间隔列数(过大会导致三个饼图相距过远)
-PIE_WIDTH = 5.2        # 饼图宽度(cm)
-PIE_HEIGHT = 5.2       # 饼图高度(cm)
-PIE_H_ROWS = 12        # 饼图占用行数(由高度估算，用于文字避让)
+PIE_WIDTH = 6        # 饼图宽度(cm)
+PIE_HEIGHT = 6       # 饼图高度(cm)
+PIE_H_ROWS = 11        # 饼图占用行数(由高度估算，用于文字避让)
+PIE_GAP_CM = 1.5     # 相邻两张饼图之间的留白(厘米)，间距即由它控制
 
 # 行高/列宽可整体调节系数(内容换行后按需放大，手动微调请改这里)
 ROW_H_SCALE = 1.0      # 行高整体缩放(>1 放大，<1 缩小)
 COL_W_SCALE = 1.0      # 列宽整体缩放
 LINE_H = 15.0          # 单行文字基准高度(磅)
+
 
 
 def _disp_width(s: Any) -> float:
@@ -393,7 +395,7 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
     chart.style = 13
     # 图表与表格同宽：按表格各列宽估算像素再换算为厘米
     col_chars = COL_WIDTHS["A"] + COL_WIDTHS["B"] + COL_WIDTHS["C"] + YEAR_COL_W * len(years) + GROWTH_COL_W
-    chart.width = int(col_chars * 7.0 / 96.0 * 2.54)
+    chart.width = int(col_chars * 6.28 / 96.0 * 2.54)
     chart.height = 14  # 加高图表
 
     data = Reference(ws, min_col=src_col + 1, min_row=1, max_col=src_col + len(years), max_row=13)
@@ -582,6 +584,35 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
     return row - 1
 
 
+def _col_width_cm(ws, col_idx: int) -> float:
+    """某列的宽度换算成厘米(1 列宽单位≈7px, 96px=1in, 1in=2.54cm)。"""
+    dim = ws.column_dimensions[get_column_letter(col_idx)]
+    w = dim.width if dim.width else 8.43   # Excel 默认列宽
+    return w * 7.0 / 96.0 * 2.54
+
+def _col_at_cm(ws, cm_pos: float, max_col: int = 400) -> int:
+    """给定一个累计厘米位置(从第1列左边缘算起)，返回它落在哪一列(列号)。
+    用于按物理厘米精确排布饼图，保证多张图间距严格一致。"""
+    acc = 0.0
+    for c in range(1, max_col):
+        acc += _col_width_cm(ws, c)
+        if acc > cm_pos:
+            return c
+    return max_col
+
+
+def _find_col_by_cm(ws, start_col: int, cm: float, max_col: int = 200) -> int:
+    """从 start_col 开始向右累加列宽，返回「累计宽度刚超过 cm」时的下一列列号。
+    用于按物理距离(厘米)推进饼图锚点，避免列宽不均导致间距不一。"""
+    acc = 0.0
+    col = start_col
+    while col < max_col:
+        acc += _col_width_cm(ws, col)
+        if acc >= cm:
+            return col + 1
+        col += 1
+    return col
+
 def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
                       anchor_row: int, data_start_col: int, data_start_row: int) -> int:
     """为每个平台生成品牌份额饼图(数据源写入隐藏列)，返回饼图区占用末行。"""
@@ -602,6 +633,7 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
     chart_row = trow + 2
     max_rows = 0
     drawn = 0
+    cm_cursor = 0.0          # 累计厘米游标：从 A 列左边缘开始
     for item in pie_data:
         platform = str(item.get("平台", "平台"))
         slices = item.get("slices", [])
@@ -648,8 +680,14 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
             _dp.spPr.solidFill = _PIE_COLORS[_j % len(_PIE_COLORS)]
             _pts.append(_dp)
         pie.series[0].data_points = _pts
-        anchor_c = get_column_letter(1 + drawn * PIE_SPACING)
+        # anchor_c = get_column_letter(1 + drawn * PIE_SPACING)
+        # ws.add_chart(pie, f"{anchor_c}{chart_row}")
+        # drawn += 1
+                # 按物理厘米推进锚点：无论各列宽是否均匀，图间水平间距恒为 PIE_GAP_CM
+        anchor_col = _col_at_cm(ws, cm_cursor)
+        anchor_c = get_column_letter(anchor_col)
         ws.add_chart(pie, f"{anchor_c}{chart_row}")
+        cm_cursor += pie.width + PIE_GAP_CM
         drawn += 1
         if n > max_rows:
             max_rows = n
