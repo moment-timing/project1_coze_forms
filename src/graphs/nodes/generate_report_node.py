@@ -739,8 +739,8 @@ def _write_analysis_text(ws, analysis_result: Dict[str, Any], start_row: int) ->
         elif label and isinstance(tail, str) and tail.strip():
             # 内联标题：标签加粗着色，正文保持默认样式
             cell.value = CellRichText([
-                TextBlock(InlineFont(sz=13, b=True, color="1F4E79"), label),
-                TextBlock(InlineFont(sz=10), tail),
+                TextBlock(InlineFont(size=13, bold=True, color="1F4E79"), label),
+                TextBlock(InlineFont(size=10), tail),
             ])
             ws.row_dimensions[row].height = max(18, body_h + 4)
         else:
@@ -786,9 +786,8 @@ def _write_brand_section(ws, shop_name: str, analysis_result: Dict[str, Any],
         rows = []
 
     cur = start_row
-    # table_last = _write_brand_table(ws, shop_name, rows, cur)
-    # cur = table_last + 2
-    cur = cur + 2
+    table_last = _write_brand_table(ws, shop_name, rows, cur)
+    cur = table_last + 2
 
     # 饼图数据源使用隐藏列(放得很靠右，避免与饼图/表格/说明文字互相遮挡)
     data_start_col = 30  # AD 列起，远离饼图与表格区域
