@@ -5,7 +5,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 
-from graphs.state import ParseDataInput, ParseDataOutput, CategoryData
+from graphs.state import ParseDataInput, ParseDataOutput, CategoryData, QuarterData
 
 
 def _extract_inner_data(raw: str) -> Dict[str, Any]:
@@ -48,14 +48,37 @@ def _parse_categories(cats_raw: Any) -> List[CategoryData]:
             for ay in raw_agg:
                 if isinstance(ay, dict):
                     agg_year.append(dict(ay))
+        agg_quarter: List[Dict[str, Any]] = []
+        raw_q = c.get("agg_quarter")
+        if isinstance(raw_q, list):
+            for aq in raw_q:
+                if isinstance(aq, dict):
+                    agg_quarter.append(dict(aq))
         categories.append(
             CategoryData(
                 platform=str(c.get("platform", "")),
                 category_name=str(c.get("category_name", "")),
                 agg_year=agg_year,
+                agg_quarter=agg_quarter,
             )
         )
     return categories
+
+
+def _collect_quarter_data(categories: List[CategoryData]) -> List[QuarterData]:
+    """从类目中提取按季度聚合数据(平台/类目维度)。"""
+    result: List[QuarterData] = []
+    for c in categories:
+        if not c.agg_quarter:
+            continue
+        result.append(
+            QuarterData(
+                platform=c.platform,
+                category_name=c.category_name,
+                agg_quarter=[dict(q) for q in c.agg_quarter],
+            )
+        )
+    return result
 
 
 def _collect_years(categories: List[CategoryData], monthly: List[Dict[str, Any]]) -> List[str]:
@@ -93,6 +116,7 @@ def parse_data_node(
     stat_time = str(meta.get("stat_time", ""))
 
     categories = _parse_categories(data.get("category_list"))
+    quarter_data = _collect_quarter_data(categories)
 
     monthly: List[Dict[str, Any]] = []
     raw_monthly = data.get("global_monthly_summary")
@@ -115,6 +139,7 @@ def parse_data_node(
         shop_name=shop_name,
         stat_time=stat_time,
         categories=categories,
+        quarter_data=quarter_data,
         monthly_summary=monthly,
         years=years,
         platform_brand_summary=brand_summary,

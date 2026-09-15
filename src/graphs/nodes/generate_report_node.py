@@ -16,6 +16,9 @@ from openpyxl.chart import LineChart, PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.axis import ChartLines
 from openpyxl.chart.marker import Marker, DataPoint
+from openpyxl.chart.series import SeriesLabel
+from openpyxl.chart.text import RichText as ChartRichText
+from openpyxl.drawing.text import Paragraph, ParagraphProperties, CharacterProperties
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 
@@ -656,7 +659,10 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
             if isinstance(val, bool) or not isinstance(val, (int, float)):
                 val = 0.0
             ws.cell(data_start_row + 1 + j, dcol + 1, float(val))
-
+        total_data_cols = drawn * 2
+        for i in range(26):  # AD 到 AZ 共 26 列
+          col_letter = get_column_letter(data_start_col + i)
+          ws.column_dimensions[col_letter].hidden = True
         data = Reference(ws, min_col=dcol + 1, min_row=data_start_row + 1,
                          max_col=dcol + 1, max_row=data_start_row + n)
         cats = Reference(ws, min_col=dcol, min_row=data_start_row + 1,
@@ -668,11 +674,35 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
         pie.add_data(data, titles_from_data=False)  # 不按首行当标题，避免错位
         pie.set_categories(cats)
         pie.visible_cells_only = False
+        # pie.dataLabels = DataLabelList()
+        # pie.dataLabels.showPercent = True
+        # pie.dataLabels.showVal = False
+        # pie.height = max(1, int(round(PIE_HEIGHT)))
+        # pie.width = max(1, int(round(PIE_WIDTH)))
         pie.dataLabels = DataLabelList()
-        pie.dataLabels.showPercent = True
-        pie.dataLabels.showVal = False
+        pie.dataLabels.showPercent = True   # 保留百分比
+        pie.dataLabels.showVal = False      # 不显示数值
+        pie.dataLabels.showSerName = False  # 关掉“系列1”这种冗余标签
+        pie.dataLabels.showCatName = True   # 显示品牌名，帮助识别
+        # 标签置于扇区外侧并带连接线，避免“字体太挤”/相互重叠
+        try:
+            pie.dataLabels.dLblPos = "outEnd"
+        except Exception:
+            pass
+        # 数据标签字号加大，避免“字体太挤”；仅让品牌占比清晰可读
+        try:
+            _lbl_p = Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=1150)))
+            pie.dataLabels.txPr = ChartRichText(p=[_lbl_p])
+        except Exception:
+            pass
+        # 显式设置系列名(平台名)，彻底消除默认“系列1”标签与图例错乱
+        try:
+            pie.series[0].tx = SeriesLabel(v=f"{platform}品牌份额")
+        except Exception:
+            pass
         pie.height = max(1, int(round(PIE_HEIGHT)))
         pie.width = max(1, int(round(PIE_WIDTH)))
+        pie.legend = None                   # 关闭图例，给饼图留空间
         # 每个扇区设置易区分的颜色(避免各平台颜色相近/相同)
         _pts = []
         for _j in range(n):
@@ -846,7 +876,7 @@ def generate_report_node(
     # 折线图下方：品牌分析表格 + 饼图 + 小结 + 分析报告文本
     # 折线图 anchor = table_last_row + 3，高14cm 约占26行，因此品牌区从其后约30行开始
     chart_anchor = table_last_row + 3
-    brand_start = chart_anchor + 32
+    brand_start = chart_anchor + 30
     _write_brand_section(
         ws,
         shop_name,

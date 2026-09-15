@@ -9,7 +9,7 @@ from coze_coding_utils.runtime_ctx.context import Context
 from coze_coding_dev_sdk import LLMClient
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from graphs.state import AnalysisInput, AnalysisOutput, CategoryData
+from graphs.state import AnalysisInput, AnalysisOutput, CategoryData, QuarterData
 
 _EMPTY = "暂无数据"
 
@@ -50,41 +50,34 @@ def _build_year_ctx(categories: List[CategoryData]) -> Dict[str, List[Dict[str, 
     return by_plat
 
 
-def _build_quarter_ctx(raw_data: str, categories: List[CategoryData]) -> str:
-    """从源数据解析 agg_quarter(季度聚合)，汇总为文本上下文。"""
-    lines: List[str] = []
-    try:
-        data = json.loads(raw_data)
-        if isinstance(data, dict):
-            inner = data.get("output_json_string")
-            if inner is not None:
-                data = inner if isinstance(inner, dict) else json.loads(inner)
-        if not isinstance(data, dict):
-            return ""
-    except Exception:
-        return ""
+def _build_quarter_ctx(quarter_data: List[QuarterData], raw_data: str) -> str:
+    """基于解析出的季度聚合数据(quarter_data)汇总为文本上下文。
 
+    优先使用解析节点已结构化输出的 quarter_data(严格来自源数据 agg_quarter)；
+    缺失时回退从原始 raw_data 中二次解析，避免"季度数据被解析丢失"。
+    """
     by_ym: Dict[str, float] = {}
-    cats_raw = data.get("category_list")
-    if isinstance(cats_raw, list):
-        for c in cats_raw:
-            if not isinstance(c, dict):
+    lines: List[str] = []
+
+    for qd in quarter_data:
+        if not isinstance(qd, QuarterData):
+            continue
+        plat = qd.platform
+        cat = qd.category_name
+        for q in qd.agg_quarter:
+            if not isinstance(q, dict):
                 continue
-            plat = str(c.get("platform", ""))
-            cat = str(c.get("category_name", ""))
-            qs = c.get("agg_quarter")
-            if not isinstance(qs, list):
-                continue
-            for q in qs:
-                if not isinstance(q, dict):
-                    continue
-                qname = str(q.get("季度", ""))
-                v = q.get("销售额(元)")
-                key = f"{plat}|{cat}|{qname}"
-                by_ym[key] = float(v) / 10000.0 if v is not None else 0.0
+            qname = str(q.get("季度", ""))
+            v = q.get("销售额(元)")
+            key = f"{plat}|{cat}|{qname}"
+            by_ym[key] = float(v) / 10000.0 if v is not None else 0.0
+
+    # 回退：从 raw_data 中二次解析 agg_quarter
+    if not by_ym:
+        by_ym.update(_extract_quarter_from_raw(raw_data))
+
     if not by_ym:
         return ""
-    # 按年汇总各平台/类目季度
     year_agg: Dict[str, Dict[str, float]] = {}
     for key, val in by_ym.items():
         qname = key.split("|")[-1]
@@ -100,6 +93,40 @@ def _build_quarter_ctx(raw_data: str, categories: List[CategoryData]) -> str:
         parts = [f"{q}={_fmt(qs.get(q))}" for q in sorted(qs)]
         lines.append(f"{y}年: {'、'.join(parts)}")
     return "年度季度趋势(全类目各平台合计，单位万元)：\n" + "\n".join(lines)
+
+
+def _extract_quarter_from_raw(raw_data: str) -> Dict[str, float]:
+    """从原始数据 raw_data 中二次解析 agg_quarter，返回 {平台|类目|季度: 万元}。"""
+    result: Dict[str, float] = {}
+    try:
+        data = json.loads(raw_data)
+        if isinstance(data, dict):
+            inner = data.get("output_json_string")
+            if inner is not None:
+                data = inner if isinstance(inner, dict) else json.loads(inner)
+        if not isinstance(data, dict):
+            return result
+    except Exception:
+        return result
+    cats_raw = data.get("category_list")
+    if not isinstance(cats_raw, list):
+        return result
+    for c in cats_raw:
+        if not isinstance(c, dict):
+            continue
+        plat = str(c.get("platform", ""))
+        cat = str(c.get("category_name", ""))
+        qs = c.get("agg_quarter")
+        if not isinstance(qs, list):
+            continue
+        for q in qs:
+            if not isinstance(q, dict):
+                continue
+            qname = str(q.get("季度", ""))
+            v = q.get("销售额(元)")
+            key = f"{plat}|{cat}|{qname}"
+            result[key] = float(v) / 10000.0 if v is not None else 0.0
+    return result
 
 
 def _build_trend_ctx(monthly: List[Dict[str, Any]], years: List[str]) -> str:
@@ -272,7 +299,10 @@ def _build_brand_analysis(
 
 def _build_context(state: AnalysisInput, categories: List[CategoryData]) -> str:
     year_ctx = _build_year_ctx(categories)
-    q_ctx = _build_quarter_ctx(state.raw_data, categories)
+    q_ctx = _build_quarter_ctx(
+        list(state.quarter_data) if isinstance(state.quarter_data, list) else [],
+        state.raw_data,
+    )
     t_ctx = _build_trend_ctx(state.monthly_summary, state.years)
 
     parts: List[str] = []

@@ -7,6 +7,14 @@ class CategoryData(BaseModel):
     platform: str = Field(default="", description="所属平台（如天猫/抖音/京东）")
     category_name: str = Field(default="", description="类目名称")
     agg_year: List[Dict[str, Any]] = Field(default=[], description="按年聚合数据，每项含 年/销售额(元)/销量(件)/均价(元)")
+    agg_quarter: List[Dict[str, Any]] = Field(default=[], description="按季度聚合数据，每项含 季度/销售额(元)")
+
+
+class QuarterData(BaseModel):
+    """季度维度聚合信息（按平台/类目）"""
+    platform: str = Field(default="", description="所属平台")
+    category_name: str = Field(default="", description="类目名称")
+    agg_quarter: List[Dict[str, Any]] = Field(default=[], description="按季度聚合数据，每项含 季度/销售额(元)")
 
 
 class GlobalState(BaseModel):
@@ -14,7 +22,8 @@ class GlobalState(BaseModel):
     raw_data: str = Field(default="", description="钉钉平台输出的原始数据JSON字符串")
     shop_name: str = Field(default="", description="目标产品名称(大类)")
     stat_time: str = Field(default="", description="统计时间")
-    categories: List[CategoryData] = Field(default=[], description="平台类目按年聚合数据")
+    categories: List[CategoryData] = Field(default=[], description="平台类目聚合数据(含年度与季度)")
+    quarter_data: List[QuarterData] = Field(default=[], description="平台类目按季度聚合数据")
     monthly_summary: List[Dict[str, Any]] = Field(default=[], description="全局月度汇总数据")
     years: List[str] = Field(default=[], description="出现的年份列表(升序)")
     platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据(platform_brand_summary)")
@@ -45,7 +54,8 @@ class ParseDataOutput(BaseModel):
     """数据解析节点输出"""
     shop_name: str = Field(..., description="目标产品名称(大类)")
     stat_time: str = Field(..., description="统计时间")
-    categories: List[CategoryData] = Field(default=[], description="平台类目按年聚合数据")
+    categories: List[CategoryData] = Field(default=[], description="平台类目聚合数据(含年度与季度)")
+    quarter_data: List[QuarterData] = Field(default=[], description="平台类目按季度聚合数据")
     monthly_summary: List[Dict[str, Any]] = Field(default=[], description="全局月度汇总数据")
     years: List[str] = Field(default=[], description="出现的年份列表(升序)")
     platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据")
@@ -56,7 +66,8 @@ class AnalysisInput(BaseModel):
     shop_name: str = Field(..., description="目标产品名称(大类)")
     stat_time: str = Field(..., description="统计时间")
     raw_data: str = Field(default="", description="原始数据JSON字符串(用于季度等维度分析)")
-    categories: List[CategoryData] = Field(default=[], description="平台类目按年聚合数据")
+    categories: List[CategoryData] = Field(default=[], description="平台类目聚合数据(含年度与季度)")
+    quarter_data: List[QuarterData] = Field(default=[], description="平台类目按季度聚合数据")
     monthly_summary: List[Dict[str, Any]] = Field(default=[], description="全局月度汇总数据")
     years: List[str] = Field(default=[], description="出现的年份列表(升序)")
     platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据")
