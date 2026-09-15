@@ -2,6 +2,11 @@ import os
 import time
 import math
 import re
+from openpyxl.chart.text import RichText
+from openpyxl.chart.title import Title
+from openpyxl.drawing.text import (
+    Paragraph, ParagraphProperties, CharacterProperties, RegularTextRun,
+)
 from typing import Dict, List, Any, Optional
 
 from langchain_core.runnables import RunnableConfig
@@ -21,6 +26,9 @@ from openpyxl.chart.text import RichText as ChartRichText
 from openpyxl.drawing.text import Paragraph, ParagraphProperties, CharacterProperties
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
+from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+from openpyxl.drawing.xdr import XDRPositiveSize2D
+from openpyxl.utils.units import cm_to_EMU
 
 from graphs.state import GenerateReportInput, GenerateReportOutput, CategoryData
 
@@ -57,13 +65,14 @@ LINE_H = 15.0          # 单行文字基线高度(磅)，与字号联动
 MIN_ROW_H = 20.0       # 最小行高(磅)
 CH_PER_UNIT = 2.0      # 一列宽单位可容纳的显示宽度(中文按2计)
 # 品牌分析区列宽(可手动微调；最终会再乘 COL_W_SCALE)
-BRAND_COL_WIDTHS = {"A": 20, "B": 18, "C": 38, "D": 18, "E": 18, "F": 18, "G": 18, "H": 12}
+BRAND_COL_WIDTHS = {"A": 20, "B": 18, "C": 38, "D": 18, "E": 18, "F": 18, "G": 18, "H": 13}
 # 饼图区参数
 PIE_SPACING = 2        # 相邻饼图间隔列数(过大会导致三个饼图相距过远)
-PIE_WIDTH = 6        # 饼图宽度(cm)
-PIE_HEIGHT = 6       # 饼图高度(cm)
-PIE_H_ROWS = 11        # 饼图占用行数(由高度估算，用于文字避让)
-PIE_GAP_CM = 1.5     # 相邻两张饼图之间的留白(厘米)，间距即由它控制
+PIE_WIDTH = 8        # 饼图宽度(cm)
+PIE_HEIGHT = 8       # 饼图高度(cm)
+PIE_H_ROWS = 16        # 饼图占用行数(由高度估算，用于文字避让)
+PIE_GAP_CM = 3     # 相邻两张饼图之间的留白(厘米)，间距即由它控制
+PIE_SLOT_CM = 9.5   # 每张饼图占用的横向槽宽(厘米)，含标签+间距
 
 # 行高/列宽可整体调节系数(内容换行后按需放大，手动微调请改这里)
 ROW_H_SCALE = 1.0      # 行高整体缩放(>1 放大，<1 缩小)
@@ -201,17 +210,6 @@ def _ceil_to(value: float, step: float) -> float:
     return math.ceil(value / step) * step
 
 # ------------------------- 折线关闭圆滑 ------------------------------------------
-# def _build_source_block(ws, years: List[str], monthly: List[Dict[str, Any]], src_col: int) -> None:
-#     """在指定起始列写入折线图的数据源(单位为万元)，月份为01-12。"""
-#     ws.cell(1, src_col, "月份")
-#     for i, y in enumerate(years):
-#         ws.cell(1, src_col + 1 + i, y)
-#     by_year = _build_monthly_by_year_wan(monthly, years)
-#     for m in range(1, 13):
-#         ws.cell(1 + m, src_col, f"{m:02d}")
-#         for i, y in enumerate(years):
-#             ws.cell(1 + m, src_col + 1 + i, round(by_year[y][m - 1], 2))
-
 def _build_source_block(ws, years: List[str], monthly: List[Dict[str, Any]], src_col: int) -> Dict[str, List[float]]:
     """写入折线图数据源，返回原始by_year_raw（用于坐标轴计算）"""
     ws.cell(1, src_col, "月份")
@@ -433,15 +431,6 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
     # 浅色网格线(横向+纵向)，方便读数
     chart.x_axis.majorGridlines = ChartLines()
     chart.y_axis.majorGridlines = ChartLines()
-
-        # 统计最大值以获得清晰Y轴刻度(从0开始，向上取整)
-    # maxv = 1.0
-    # by_year = _build_monthly_by_year_wan(monthly, years)
-    # for y in years:
-    #     m = max(by_year[y]) if by_year[y] else 0.0
-    #     if m > maxv:
-    #         maxv = m
-    #     _step = _nice_step(maxv)
     # -------------------------- 关闭折线圆滑 ----------------------------
     maxv = 1.0
     for y in years:
@@ -545,7 +534,7 @@ def _write_brand_table(ws, shop_name: str, rows: List[Dict[str, Any]], start_row
                 str(rdata.get("目标产品", "")),
                 str(rdata.get("平台", "")),
                 str(rdata.get("类目", "")),
-                str(rdata.get("品牌情况", "")),
+                str(rdata.get("品牌情况", "")).replace("发布图", "份额图"),
                 str(rdata.get("集中度说明", "")),
                 str(rdata.get("竞争情况", "")),
                 str(rdata.get("目标产品类目占比", "")),
@@ -648,16 +637,24 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
         # 仅使用第 6 个及之后的长尾品牌不展示，防止标签混乱
         n = len(valid)
         dcol = data_start_col + drawn * 2
-        # 数据源(隐藏列)：品牌名 + 销售额数值(直接用销售额画饼图，保证占比真实)
         ws.cell(data_start_row, dcol, "品牌")
         ws.cell(data_start_row, dcol + 1, f"{platform}-销售额(元)")
+        total_val = sum(
+            float(s.get("销售额(元)") or 0)
+            for s in valid
+            if isinstance(s.get("销售额(元)"), (int, float))
+            and not isinstance(s.get("销售额(元)"), bool)
+        )
         for j, s in enumerate(valid):
             if j >= 40:
                 break
-            ws.cell(data_start_row + 1 + j, dcol, str(s.get("品牌", "")))
+            brand = str(s.get("品牌", ""))
             val = s.get("销售额(元)")
             if isinstance(val, bool) or not isinstance(val, (int, float)):
                 val = 0.0
+            pct = (float(val) / total_val * 100) if total_val else 0.0
+            label = f"{brand} {pct:.1f}%"
+            ws.cell(data_start_row + 1 + j, dcol, label)      # 类别名 = "品牌 XX%"
             ws.cell(data_start_row + 1 + j, dcol + 1, float(val))
         total_data_cols = drawn * 2
         for i in range(26):  # AD 到 AZ 共 26 列
@@ -670,20 +667,33 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
 
         pie = PieChart()
         pie.title = f"{platform}品牌份额"
+        # 统一标题字体：加粗，避免三个饼图标题粗细不一致
+        try:
+            from openpyxl.chart.text import RichTextProperties
+            pie.title.tx.rich.p[0].r[0].rPr = CharacterProperties(
+                sz=1200, b=True, solidFill="000000",
+                latin=None,            # 不指定拉丁字体
+                ea=None,               # 不指定东亚字体
+                cs=None,
+            )
+            # 单独给东亚字体（中文用）
+            from openpyxl.drawing.text import Font as DrawFont
+            pie.title.tx.rich.p[0].r[0].rPr.ea = DrawFont(typeface="微软雅黑")
+            pie.title.tx.rich.p[0].r[0].rPr.latin = DrawFont(typeface="微软雅黑")
+        except Exception:
+            pass
+        
         pie.style = 13
         pie.add_data(data, titles_from_data=False)  # 不按首行当标题，避免错位
         pie.set_categories(cats)
         pie.visible_cells_only = False
-        # pie.dataLabels = DataLabelList()
-        # pie.dataLabels.showPercent = True
-        # pie.dataLabels.showVal = False
-        # pie.height = max(1, int(round(PIE_HEIGHT)))
-        # pie.width = max(1, int(round(PIE_WIDTH)))
         pie.dataLabels = DataLabelList()
-        pie.dataLabels.showPercent = True   # 保留百分比
+        pie.dataLabels.showPercent = False   # 保留百分比
         pie.dataLabels.showVal = False      # 不显示数值
         pie.dataLabels.showSerName = False  # 关掉“系列1”这种冗余标签
-        pie.dataLabels.showCatName = True   # 显示品牌名，帮助识别
+        pie.dataLabels.showCatName = False   # 显示品牌名，帮助识别
+        pie.legend.position = "r"          # 系列设在图右侧，"b"底部，"t"头部，"l"左侧
+        # pie.legend.overlay = False       #设置系列文字不覆盖饼状图
         # 标签置于扇区外侧并带连接线，避免“字体太挤”/相互重叠
         try:
             pie.dataLabels.dLblPos = "outEnd"
@@ -702,7 +712,7 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
             pass
         pie.height = max(1, int(round(PIE_HEIGHT)))
         pie.width = max(1, int(round(PIE_WIDTH)))
-        pie.legend = None                   # 关闭图例，给饼图留空间
+        # pie.legend = None                   # 关闭图例，给饼图留空间
         # 每个扇区设置易区分的颜色(避免各平台颜色相近/相同)
         _pts = []
         for _j in range(n):
@@ -710,14 +720,25 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
             _dp.spPr.solidFill = _PIE_COLORS[_j % len(_PIE_COLORS)]
             _pts.append(_dp)
         pie.series[0].data_points = _pts
-        # anchor_c = get_column_letter(1 + drawn * PIE_SPACING)
-        # ws.add_chart(pie, f"{anchor_c}{chart_row}")
-        # drawn += 1
-                # 按物理厘米推进锚点：无论各列宽是否均匀，图间水平间距恒为 PIE_GAP_CM
-        anchor_col = _col_at_cm(ws, cm_cursor)
-        anchor_c = get_column_letter(anchor_col)
-        ws.add_chart(pie, f"{anchor_c}{chart_row}")
-        cm_cursor += pie.width + PIE_GAP_CM
+        slot_cm = drawn * PIE_SLOT_CM          # 该饼图槽的起点（从第1列左边缘算起）
+        anchor_col = _col_at_cm(ws, slot_cm)   # 落点列
+        # 计算落点列左边缘相对第1列左边缘的累计厘米，得出 colOff 补偿
+        prev_cm = 0.0
+        for c in range(1, anchor_col):
+            prev_cm += _col_width_cm(ws, c)
+        col_off_cm = max(0.0, slot_cm - prev_cm)
+        marker = AnchorMarker(
+            col=anchor_col - 1,               # 0-based
+            colOff=cm_to_EMU(col_off_cm),
+            row=chart_row - 1,                # 0-based
+            rowOff=0,
+        )
+        size = XDRPositiveSize2D(
+            cx=cm_to_EMU(PIE_WIDTH),
+            cy=cm_to_EMU(PIE_HEIGHT),
+        )
+        pie.anchor = OneCellAnchor(_from=marker, ext=size)
+        ws.add_chart(pie)                     # 注意：不传坐标参数
         drawn += 1
         if n > max_rows:
             max_rows = n
