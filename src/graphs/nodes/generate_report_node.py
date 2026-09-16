@@ -790,8 +790,8 @@ def _write_analysis_text(ws, analysis_result: Dict[str, Any], start_row: int) ->
         elif label and isinstance(tail, str) and tail.strip():
             # 内联标题：标签加粗着色，正文保持默认样式
             cell.value = CellRichText([
-                TextBlock(InlineFont(size=13, bold=True, color="1F4E79"), label),
-                TextBlock(InlineFont(size=10), tail),
+                TextBlock(InlineFont(sz=13, bold=True, color="1F4E79"), label),
+                TextBlock(InlineFont(sz=10), tail),
             ])
             ws.row_dimensions[row].height = max(18, body_h + 4)
         else:
