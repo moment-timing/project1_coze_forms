@@ -167,17 +167,28 @@ def _build_raw_and_chart_data(monthly: List[Dict[str, Any]], years: List[str]):
             v = m.get("销售额(元)")
             by_year_raw[y][month - 1] = (float(v) / 10000.0) if v is not None else 0.0
 
-    # 生成图表数据：最后>0点之后全部置None，用于截断折线
+        # 生成图表数据：首尾>0点之外的月份全部置None，用于截断折线
     by_year_chart: Dict[str, List[Optional[float]]] = {}
     for year, data_list in by_year_raw.items():
         chart_list: List[Optional[float]] = data_list.copy()
-        last_valid_idx = -1
-        for idx, num in enumerate(chart_list):
-            if num > 0:
-                last_valid_idx = idx
-        if last_valid_idx != -1:
-            for idx in range(last_valid_idx + 1, 12):
-                chart_list[idx] = None
+
+        # 找第一个和最后一个有效点
+        valid_indices = [idx for idx, num in enumerate(chart_list) if num > 0]
+        if not valid_indices:
+            # 全年无数据：全部置None，避免画一条贴底直线
+            by_year_chart[year] = [None] * 12
+            continue
+
+        first_valid_idx = valid_indices[0]
+        last_valid_idx = valid_indices[-1]
+
+        # 头部截断
+        for idx in range(0, first_valid_idx):
+            chart_list[idx] = None
+        # 尾部截断
+        for idx in range(last_valid_idx + 1, 12):
+            chart_list[idx] = None
+
         by_year_chart[year] = chart_list
     return by_year_raw, by_year_chart
 
