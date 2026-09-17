@@ -297,8 +297,8 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
             cat_cell.alignment = LEFT_CENTER
             for i, y in enumerate(years):
                 v = _gmv_for(cat.agg_year, y)
-                cell = ws.cell(row, 4 + i, round(v, 1))
-                cell.number_format = "#,##0.0"
+                cell = ws.cell(row, 4 + i, round(v, 2))
+                cell.number_format = "#,##0.00"
                 plat_gmv[i] += v
                 total_gmv[i] += v
             last_col_idx = 3 + len(years) + 1
@@ -317,8 +317,8 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
         sub_cell.font = Font(bold=True)
         sub_cell.alignment = CENTER
         for i in range(len(years)):
-            cell = ws.cell(row, 4 + i, round(plat_gmv[i], 1))
-            cell.number_format = "#,##0.0"
+            cell = ws.cell(row, 4 + i, round(plat_gmv[i], 2))
+            cell.number_format = "#,##0.00"
             cell.font = Font(bold=True)
         last_col_idx = 3 + len(years) + 1
         g = _calc_growth(plat_gmv[-1], plat_gmv[-2])
@@ -343,8 +343,8 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
     for c in (1, 2):
         ws.cell(row, c).font = Font(bold=True)
     for i in range(len(years)):
-        cell = ws.cell(row, 4 + i, round(total_gmv[i], 1))
-        cell.number_format = "#,##0.0"
+        cell = ws.cell(row, 4 + i, round(total_gmv[i], 2))
+        cell.number_format = "#,##0.00"
         cell.font = Font(bold=True)
     last_col_idx = 3 + len(years) + 1
     g = _calc_growth(total_gmv[-1], total_gmv[-2])
@@ -402,9 +402,30 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
     for i in range(len(years) + 1):
         ws.column_dimensions[get_column_letter(src_col + i)].hidden = True
 
+    # chart = LineChart()
+    # chart.title = f"{shop_name} 月度销售额趋势(万元)"
+    # chart.style = 13
     chart = LineChart()
     chart.title = f"{shop_name} 月度销售额趋势(万元)"
     chart.style = 13
+
+    # ===== 折线图标题字体：与饼图标题保持一致（加粗、微软雅黑、黑色）=====
+    try:
+        from openpyxl.chart.text import RichTextProperties
+        from openpyxl.drawing.text import Font as DrawFont
+
+        # 标题正文：加粗、12pt、黑色
+        chart.title.tx.rich.p[0].r[0].rPr = CharacterProperties(
+            sz=1100, b=True, solidFill="000000",
+            latin=None,
+            ea=None,
+            cs=None,
+        )
+        # 中英文都用微软雅黑
+        chart.title.tx.rich.p[0].r[0].rPr.ea = DrawFont(typeface="微软雅黑")
+        chart.title.tx.rich.p[0].r[0].rPr.latin = DrawFont(typeface="微软雅黑")
+    except Exception:
+        pass
     # 图表与表格同宽：按表格各列宽估算像素再换算为厘米
     col_chars = COL_WIDTHS["A"] + COL_WIDTHS["B"] + COL_WIDTHS["C"] + YEAR_COL_W * len(years) + GROWTH_COL_W
     chart.width = int(col_chars * 6.28 / 96.0 * 2.54)
