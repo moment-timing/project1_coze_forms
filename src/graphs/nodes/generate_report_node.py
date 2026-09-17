@@ -24,6 +24,7 @@ from openpyxl.chart.marker import Marker, DataPoint
 from openpyxl.chart.series import SeriesLabel
 from openpyxl.chart.text import RichText as ChartRichText
 from openpyxl.drawing.text import Paragraph, ParagraphProperties, CharacterProperties
+from openpyxl.drawing.text import Font as DrawFont
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
@@ -411,19 +412,17 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
 
     # ===== 折线图标题字体：与饼图标题保持一致（加粗、微软雅黑、黑色）=====
     try:
-        from openpyxl.chart.text import RichTextProperties
-        from openpyxl.drawing.text import Font as DrawFont
-
-        # 标题正文：加粗、12pt、黑色
-        chart.title.tx.rich.p[0].r[0].rPr = CharacterProperties(
-            sz=1100, b=True, solidFill="000000",
-            latin=None,
-            ea=None,
-            cs=None,
-        )
-        # 中英文都用微软雅黑
-        chart.title.tx.rich.p[0].r[0].rPr.ea = DrawFont(typeface="微软雅黑")
-        chart.title.tx.rich.p[0].r[0].rPr.latin = DrawFont(typeface="微软雅黑")
+        _t_title = chart.title
+        _t_rich = getattr(_t_title, "tx", None).rich
+        _t_p0 = getattr(_t_rich, "p", [None])[0]
+        _t_r0 = getattr(_t_p0, "r", [None])[0]
+        if _t_r0 is not None:
+            _t_r0.rPr = CharacterProperties(
+                sz=1100, b=True, solidFill="000000",
+                latin=None, ea=None, cs=None,
+            )
+            _t_r0.rPr.ea = DrawFont(typeface="微软雅黑")
+            _t_r0.rPr.latin = DrawFont(typeface="微软雅黑")
     except Exception:
         pass
     # 图表与表格同宽：按表格各列宽估算像素再换算为厘米
@@ -491,6 +490,30 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
 
     anchor_row = table_last_row + 3
     ws.add_chart(chart, f"A{anchor_row}")
+
+    # ===== 折线图下方：标注数据范围 (如 "数据范围：2023.1-2026.7") =====
+    range_row = anchor_row + 27  # 折线图高14cm约占27行，其下第一行落点
+    if isinstance(monthly, list) and monthly:
+        _ym = []
+        for _m in monthly:
+            if not isinstance(_m, dict):
+                continue
+            _mk = str(_m.get("月", "") or _m.get("month", "") or "")
+            _mobj = re.match(r"^(\d{4})[-/.年](\d{1,2})", _mk)
+            if _mobj:
+                _ym.append((int(_mobj.group(1)), int(_mobj.group(2))))
+        if _ym:
+            _miny, _minm = min(_ym)
+            _maxy, _maxm = max(_ym)
+            _rc = ws.cell(range_row, 1, f"数据范围：{_miny}.{_minm}-{_maxy}.{_maxm}")
+            _rc.font = Font(size=10, color="808080")
+            _rc.alignment = Alignment(horizontal="left", vertical="center")
+            ws.merge_cells(
+                start_row=range_row, start_column=1,
+                end_row=range_row, end_column=n_cols,
+            )
+            ws.row_dimensions[range_row].height = 18
+
     return anchor_row
 
 
@@ -701,17 +724,17 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
         pie.title = f"{platform}品牌份额"
         # 统一标题字体：加粗，避免三个饼图标题粗细不一致
         try:
-            from openpyxl.chart.text import RichTextProperties
-            pie.title.tx.rich.p[0].r[0].rPr = CharacterProperties(
-                sz=1200, b=True, solidFill="000000",
-                latin=None,            # 不指定拉丁字体
-                ea=None,               # 不指定东亚字体
-                cs=None,
-            )
-            # 单独给东亚字体（中文用）
-            from openpyxl.drawing.text import Font as DrawFont
-            pie.title.tx.rich.p[0].r[0].rPr.ea = DrawFont(typeface="微软雅黑")
-            pie.title.tx.rich.p[0].r[0].rPr.latin = DrawFont(typeface="微软雅黑")
+            _p_title = pie.title
+            _p_rich = getattr(_p_title, "tx", None).rich
+            _p_p0 = getattr(_p_rich, "p", [None])[0]
+            _p_r0 = getattr(_p_p0, "r", [None])[0]
+            if _p_r0 is not None:
+                _p_r0.rPr = CharacterProperties(
+                    sz=1200, b=True, solidFill="000000",
+                    latin=None, ea=None, cs=None,
+                )
+                _p_r0.rPr.ea = DrawFont(typeface="微软雅黑")
+                _p_r0.rPr.latin = DrawFont(typeface="微软雅黑")
         except Exception:
             pass
         
@@ -769,7 +792,7 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
             cx=cm_to_EMU(PIE_WIDTH),
             cy=cm_to_EMU(PIE_HEIGHT),
         )
-        pie.anchor = OneCellAnchor(_from=marker, ext=size)
+        pie.anchor = OneCellAnchor(_from=marker, ext=size)  # type: ignore[assignment]
         ws.add_chart(pie)                     # 注意：不传坐标参数
         drawn += 1
         if n > max_rows:
