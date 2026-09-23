@@ -27,6 +27,7 @@ from openpyxl.drawing.text import Paragraph, ParagraphProperties, CharacterPrope
 from openpyxl.drawing.text import Font as DrawFont
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
+from openpyxl.cell.cell import MergedCell
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
 from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.utils.units import cm_to_EMU
@@ -923,6 +924,83 @@ def _write_brand_section(ws, shop_name: str, analysis_result: Dict[str, Any],
 
 
 
+_RAW_PRODUCT_COLUMNS = [
+    "年", "月", "平台", "一级品类", "二级品类", "三级品类",
+    "品牌", "店铺", "商品名", "商品ID", "URL", "销售额(元)", "销量(件)", "均价(元)",
+]
+_RAW_PRODUCT_COL_WIDTHS = {
+    "年": 8, "月": 10, "平台": 10, "一级品类": 14, "二级品类": 14, "三级品类": 14,
+    "品牌": 18, "店铺": 24, "商品名": 45, "商品ID": 18, "URL": 50, "销售额(元)": 12,
+    "销量(件)": 10, "均价(元)": 10,
+}
+
+
+def _write_raw_product_sheet(wb: Workbook, shop_name: str, raw_product_data: List[Dict[str, Any]]) -> None:
+    """在报告中新增“商品源数据”sheet，如实填入最近一月各平台商品原始明细数据。
+
+    多个平台的数据合并放在同一个 sheet 中，按行逐条排布。
+    """
+    if not raw_product_data:
+        return
+    if "商品源数据" in wb.sheetnames:
+        ws = wb["商品源数据"]
+    else:
+        ws = wb.create_sheet("商品源数据")
+
+    # 标题行
+    ws.cell(1, 1, f"{shop_name} 商品源数据（最近一个月原始明细）")
+    title_cell = ws.cell(1, 1)
+    title_cell.font = Font(size=14, bold=True, color="FFFFFF")
+    title_cell.fill = PatternFill("solid", fgColor=TITLE_FILL)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(_RAW_PRODUCT_COLUMNS))
+    ws.row_dimensions[1].height = 26
+
+    # 表头
+    for ci, col in enumerate(_RAW_PRODUCT_COLUMNS, start=1):
+        cell = ws.cell(2, ci, col)
+        cell.font = Font(size=10, bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
+        cell.alignment = CENTER
+        cell.border = BORDER
+    ws.row_dimensions[2].height = 22
+
+    # 数据行（如实填写，不捏造）
+    for ri, item in enumerate(raw_product_data, start=3):
+        for ci, col in enumerate(_RAW_PRODUCT_COLUMNS, start=1):
+            val = item.get(col)
+            # 商品ID/商品数量等大整数列按文本写，避免科学计数法，保证如实展示
+            if col == "商品ID" and isinstance(val, (int, float)) and val is not None:
+                cell = ws.cell(ri, ci, str(int(val)))
+            else:
+                cell = ws.cell(ri, ci, val)
+            cell.font = Font(size=10)
+            cell.alignment = LEFT_CENTER
+            cell.border = BORDER
+            # URL 超链接（仅 URL 列设置）
+            if col == "URL" and isinstance(val, str) and val.startswith(("http://", "https://")) and not isinstance(cell, MergedCell):
+                cell.hyperlink = val
+                cell.font = Font(size=10, color="0563C1", underline="single")
+        # 列宽
+        for ci in range(1, len(_RAW_PRODUCT_COLUMNS) + 1):
+            ws.column_dimensions[get_column_letter(ci)].width = _RAW_PRODUCT_COL_WIDTHS.get(_RAW_PRODUCT_COLUMNS[ci - 1], 12)
+        # 行高自适应
+        ws.row_dimensions[ri].height = max(20, _auto_height_value(item))
+
+    # 冻结标题与表头
+    ws.freeze_panes = "A3"
+    ws.sheet_view.zoomScale = 90
+
+
+def _auto_height_value(item: Dict[str, Any]) -> float:
+    """根据商品名/URL等到内容长度估算行高行数对应的像素，用于商品源数据行高。"""
+    chars = 0
+    for col in ("商品名", "URL", "店铺", "品牌"):
+        v = str(item.get(col, "") or "")
+        chars += sum(2 if ord(ch) > 255 else 1 for ch in v)
+    lines = max(1, math.ceil(chars / 60))
+    return lines * 16
+
+
 def generate_report_node(
     state: GenerateReportInput,
     config: RunnableConfig,
@@ -964,6 +1042,12 @@ def generate_report_node(
     local_dir = "/tmp"
     fname = f"sales_analysis_report_{int(time.time())}.xlsx"
     local_path = os.path.join(local_dir, fname)
+
+    # 新增“商品源数据”sheet：若存在最近一月商品原始明细数据则另开一页填充
+    raw_product_data = getattr(state, "raw_product_data", None)
+    if isinstance(raw_product_data, list) and raw_product_data:
+        _write_raw_product_sheet(wb, shop_name, raw_product_data)
+
     wb.save(local_path)
 
     with open(local_path, "rb") as f:

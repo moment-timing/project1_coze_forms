@@ -54,12 +54,19 @@ def _parse_categories(cats_raw: Any) -> List[CategoryData]:
             for aq in raw_q:
                 if isinstance(aq, dict):
                     agg_quarter.append(dict(aq))
+        raw_detail: List[Dict[str, Any]] = []
+        raw_d = c.get("latest_month_raw_data")
+        if isinstance(raw_d, list):
+            for r in raw_d:
+                if isinstance(r, dict):
+                    raw_detail.append(dict(r))
         categories.append(
             CategoryData(
                 platform=str(c.get("platform", "")),
                 category_name=str(c.get("category_name", "")),
                 agg_year=agg_year,
                 agg_quarter=agg_quarter,
+                latest_month_raw_data=raw_detail,
             )
         )
     return categories
@@ -78,6 +85,15 @@ def _collect_quarter_data(categories: List[CategoryData]) -> List[QuarterData]:
                 agg_quarter=[dict(q) for q in c.agg_quarter],
             )
         )
+    return result
+
+
+def _collect_raw_product_data(categories: List[CategoryData]) -> List[Dict[str, Any]]:
+    """按平台合并各品类的最新一月商品原始明细数据(如实收集，不做任何改动)。"""
+    result: List[Dict[str, Any]] = []
+    for c in categories:
+        for item in c.latest_month_raw_data:
+            result.append(dict(item))
     return result
 
 
@@ -135,6 +151,8 @@ def parse_data_node(
 
     years = _collect_years(categories, monthly)
 
+    raw_product_data = _collect_raw_product_data(categories)
+
     return ParseDataOutput(
         shop_name=shop_name,
         stat_time=stat_time,
@@ -143,4 +161,5 @@ def parse_data_node(
         monthly_summary=monthly,
         years=years,
         platform_brand_summary=brand_summary,
+        raw_product_data=raw_product_data,
     )

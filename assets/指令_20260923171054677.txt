@@ -1,0 +1,6 @@
+1、源数据格式见文件：‘源数据模板.txt’。请在原有的功能上在加一个功能，先判断"latest_month_raw_data":字段是否有数据，如果任意平台的"latest_month_raw_data"字段有数据那么另外加一页sheet来填入"latest_month_raw_data"字段的数据，如图‘商品源数据.png’所示的格式，把数据填进去。多个平台的"latest_month_raw_data"字段有数据的话不用多开sheet页，按平台放在一页就行
+
+2、不要把"latest_month_raw_data"字段的内容传到大模型分析里去，大模型节点保持原来的数据和分析，不用改大模型节点也不要加任何数据，"latest_month_raw_data"字段的内容直接传给生表节点去在原生成的表格中另开一页sheet填入内容。
+
+!!!不要捏造数据，如实填写
+!!!原有的功能不要动

@@ -8,6 +8,7 @@ class CategoryData(BaseModel):
     category_name: str = Field(default="", description="类目名称")
     agg_year: List[Dict[str, Any]] = Field(default=[], description="按年聚合数据，每项含 年/销售额(元)/销量(件)/均价(元)")
     agg_quarter: List[Dict[str, Any]] = Field(default=[], description="按季度聚合数据，每项含 季度/销售额(元)")
+    latest_month_raw_data: List[Dict[str, Any]] = Field(default=[], description="最近一个月商品原始明细数据(未聚合，含年/月/平台/品类/品牌/店铺/商品名/商品ID/URL/销售额/销量/均价)")
 
 
 class QuarterData(BaseModel):
@@ -27,6 +28,7 @@ class GlobalState(BaseModel):
     monthly_summary: List[Dict[str, Any]] = Field(default=[], description="全局月度汇总数据")
     years: List[str] = Field(default=[], description="出现的年份列表(升序)")
     platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据(platform_brand_summary)")
+    raw_product_data: List[Dict[str, Any]] = Field(default=[], description="最近一月商品原始明细数据(按平台合并，仅用作另开sheet展示，不参与大模型分析)")
     analysis_result: Dict[str, Any] = Field(default={}, description="市场分析结果(年度/季度/平台品牌/趋势/结论 + 品牌分析表)")
     pie_data: List[Dict[str, Any]] = Field(default=[], description="各平台品牌份额饼图数据")
     report_key: str = Field(default="", description="对象存储上报的key")
@@ -59,6 +61,7 @@ class ParseDataOutput(BaseModel):
     monthly_summary: List[Dict[str, Any]] = Field(default=[], description="全局月度汇总数据")
     years: List[str] = Field(default=[], description="出现的年份列表(升序)")
     platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据")
+    raw_product_data: List[Dict[str, Any]] = Field(default=[], description="最近一月商品原始明细数据(按平台合并)")
 
 
 class AnalysisInput(BaseModel):
@@ -89,6 +92,7 @@ class GenerateReportInput(BaseModel):
     platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据")
     analysis_result: Dict[str, Any] = Field(default={}, description="市场分析结果(含分析文本与品牌分析表)")
     pie_data: List[Dict[str, Any]] = Field(default=[], description="各平台品牌份额饼图数据")
+    raw_product_data: List[Dict[str, Any]] = Field(default=[], description="最近一月商品原始明细数据(按平台合并，另开sheet展示)")
 
 
 class GenerateReportOutput(BaseModel):
