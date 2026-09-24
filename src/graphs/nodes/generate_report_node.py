@@ -241,7 +241,35 @@ def _build_source_block(ws, years: List[str], monthly: List[Dict[str, Any]], src
     return by_year_raw
 
 
-def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categories: List[CategoryData]) -> int:
+def _format_yoy_text(raw: Any, latest_year: str) -> str:
+    """将源数据同比值格式化为展示文本。
+
+    规则：
+    - 数字(如 134.13) → "134.13%"（末尾补 % 符号）
+    - 空/缺失/0/null → "最新年份-1年同时期为0"
+    """
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw != 0:
+        return f"{round(float(raw), 2)}%"
+    prev_year = str(int(latest_year) - 1) if str(latest_year).isdigit() else str(latest_year)
+    return f"{prev_year}年同时期为0"
+
+
+def _apply_yoy_cell(cell, raw: Any, latest_year: str, bold: bool = False) -> None:
+    """把同比值写入单元格：文本形式，数字负值标红。"""
+    text = _format_yoy_text(raw, latest_year)
+    cell.value = text
+    cell.number_format = "@"
+    if bold:
+        cell.font = Font(bold=True)
+    else:
+        cell.font = Font()
+    # 数字来源且为负时用红字
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw < 0:
+        cell.font = Font(bold=bold, color="C00000")
+
+
+def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categories: List[CategoryData],
+                 global_sales_yoy_pct: Optional[float] = None) -> int:
     """构建“市场体量”数据表，返回表体最后一行行号。"""
     n_cols = 3 + len(years) + 1
     last_col = get_column_letter(n_cols)
@@ -304,11 +332,10 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
                 plat_gmv[i] += v
                 total_gmv[i] += v
             last_col_idx = 3 + len(years) + 1
-            g = _calc_growth(_gmv_for(cat.agg_year, years[-1]), _gmv_for(cat.agg_year, years[-2]))
-            cell = ws.cell(row, last_col_idx, g)
-            cell.number_format = '0.00"%"'
-            if g is not None and g < 0:
-                cell.font = Font(color="C00000")
+            # 增幅：优先使用源数据自带的 sales_yoy_pct，不再自行用同比计算
+            g_raw = getattr(cat, "sales_yoy_pct", None)
+            cell = ws.cell(row, last_col_idx)
+            _apply_yoy_cell(cell, g_raw, years[-1])
             ws.row_dimensions[row].height = BODY_ROW_H
             row += 1
 
@@ -349,12 +376,8 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
         cell.number_format = "#,##0.00"
         cell.font = Font(bold=True)
     last_col_idx = 3 + len(years) + 1
-    g = _calc_growth(total_gmv[-1], total_gmv[-2])
-    cell = ws.cell(row, last_col_idx, g)
-    cell.number_format = '0.00"%"'
-    cell.font = Font(bold=True)
-    if g is not None and g < 0:
-        cell.font = Font(bold=True, color="C00000")
+    cell = ws.cell(row, last_col_idx)
+    _apply_yoy_cell(cell, global_sales_yoy_pct, years[-1], bold=True)
     for c in range(1, n_cols + 1):
         ws.cell(row, c).fill = PatternFill("solid", fgColor=TOTAL_FILL)
     ws.row_dimensions[row].height = BODY_ROW_H
@@ -391,6 +414,26 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
         note_row += 1
 
     return note_row - 1
+
+
+def _chart_comment_row(ws, anchor_row: int, chart_height_cm: float) -> int:
+    """根据图表渲染高度(chart_height_cm, 单位为厘米)与实际行高,
+    动态计算图表下方安全放置注释文本的首行行号, 确保文本不被图表遮挡。
+    openpyxl 将图表高度换算为 EMU (1cm=360000EMU), 并用高度除以行高确定覆盖的行数。
+    """
+    height_emu = float(chart_height_cm) * 360000.0 if chart_height_cm else 5040000.0
+    row_pt_to_emu = 12700.0  # 1pt(pt) = 12700 EMU
+    default_pt = 15.0        # 缺省行高(pt)
+    acc = 0.0
+    r = int(anchor_row)
+    # 从锚点行(含)开始累计实际行高, 直到累计高度盖过图表高度为止
+    while acc < height_emu:
+        dim = ws.row_dimensions.get(r)
+        h_pt = dim.height if (dim is not None and dim.height) else default_pt
+        acc += float(h_pt) * row_pt_to_emu
+        r += 1
+    # 额外补 1-2 行缓冲, 避免因行高取整误差仍紧贴图表下沿
+    return r + 1
 
 
 def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, Any]],
@@ -493,14 +536,15 @@ def _build_chart(ws, shop_name: str, years: List[str], monthly: List[Dict[str, A
     ws.add_chart(chart, f"A{anchor_row}")
 
     # ===== 折线图下方：标注数据范围 (如 "数据范围：2023.1-2026.7") =====
-    range_row = anchor_row + 27  # 折线图高14cm约占27行，其下第一行落点
+    # 图表高14cm的渲染高度按实际行高换算为所占行数，避免文字被图表压住遮挡
+    range_row = _chart_comment_row(ws, anchor_row, chart.height)
     if isinstance(monthly, list) and monthly:
         _ym = []
         for _m in monthly:
             if not isinstance(_m, dict):
                 continue
             _mk = str(_m.get("月", "") or _m.get("month", "") or "")
-            _mobj = re.match(r"^(\d{4})[-/.年](\d{1,2})", _mk)
+            _mobj = re.match(r"^(\d{4})[-/.年]?(\d{1,2})", _mk)
             if _mobj:
                 _ym.append((int(_mobj.group(1)), int(_mobj.group(2))))
         if _ym:
@@ -924,21 +968,41 @@ def _write_brand_section(ws, shop_name: str, analysis_result: Dict[str, Any],
 
 
 
-_RAW_PRODUCT_COLUMNS = [
+_RAW_PRODUCT_BASE_COLUMNS = [
     "年", "月", "平台", "一级品类", "二级品类", "三级品类",
     "品牌", "店铺", "商品名", "商品ID", "URL", "销售额(元)", "销量(件)", "均价(元)",
 ]
+_RAW_PRODUCT_EXTRA_COLUMNS = ["四级品类"]
 _RAW_PRODUCT_COL_WIDTHS = {
     "年": 8, "月": 10, "平台": 10, "一级品类": 14, "二级品类": 14, "三级品类": 14,
-    "品牌": 18, "店铺": 24, "商品名": 45, "商品ID": 18, "URL": 50, "销售额(元)": 12,
-    "销量(件)": 10, "均价(元)": 10,
+    "四级品类": 14, "品牌": 18, "店铺": 24, "商品名": 45, "商品ID": 18, "URL": 50,
+    "销售额(元)": 12, "销量(件)": 10, "均价(元)": 10,
 }
+
+
+def _raw_product_columns(raw_product_data: List[Dict[str, Any]]) -> List[str]:
+    """根据源数据动态生成商品源数据页列。
+
+    若任一明细含“四级品类”字段，则在“三级品类”后插入该列；
+    否则仅使用基础列。
+    """
+    has_fourth = any(
+        isinstance(item, dict) and item.get("四级品类") is not None
+        for item in raw_product_data
+    )
+    if not has_fourth:
+        return list(_RAW_PRODUCT_BASE_COLUMNS)
+    cols = list(_RAW_PRODUCT_BASE_COLUMNS)
+    idx = cols.index("三级品类") if "三级品类" in cols else len(cols)
+    cols.insert(idx + 1, "四级品类")
+    return cols
 
 
 def _write_raw_product_sheet(wb: Workbook, shop_name: str, raw_product_data: List[Dict[str, Any]]) -> None:
     """在报告中新增“商品源数据”sheet，如实填入最近一月各平台商品原始明细数据。
 
     多个平台的数据合并放在同一个 sheet 中，按行逐条排布。
+    列动态生成：若源数据含“四级品类”则自动追加该列，否则沿用基础列。
     """
     if not raw_product_data:
         return
@@ -947,16 +1011,19 @@ def _write_raw_product_sheet(wb: Workbook, shop_name: str, raw_product_data: Lis
     else:
         ws = wb.create_sheet("商品源数据")
 
+    columns = _raw_product_columns(raw_product_data)
+    ncols = len(columns)
+
     # 标题行
     ws.cell(1, 1, f"{shop_name} 商品源数据（最近一个月原始明细）")
     title_cell = ws.cell(1, 1)
     title_cell.font = Font(size=14, bold=True, color="FFFFFF")
     title_cell.fill = PatternFill("solid", fgColor=TITLE_FILL)
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(_RAW_PRODUCT_COLUMNS))
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
     ws.row_dimensions[1].height = 26
 
     # 表头
-    for ci, col in enumerate(_RAW_PRODUCT_COLUMNS, start=1):
+    for ci, col in enumerate(columns, start=1):
         cell = ws.cell(2, ci, col)
         cell.font = Font(size=10, bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
@@ -966,7 +1033,7 @@ def _write_raw_product_sheet(wb: Workbook, shop_name: str, raw_product_data: Lis
 
     # 数据行（如实填写，不捏造）
     for ri, item in enumerate(raw_product_data, start=3):
-        for ci, col in enumerate(_RAW_PRODUCT_COLUMNS, start=1):
+        for ci, col in enumerate(columns, start=1):
             val = item.get(col)
             # 商品ID/商品数量等大整数列按文本写，避免科学计数法，保证如实展示
             if col == "商品ID" and isinstance(val, (int, float)) and val is not None:
@@ -981,8 +1048,8 @@ def _write_raw_product_sheet(wb: Workbook, shop_name: str, raw_product_data: Lis
                 cell.hyperlink = val
                 cell.font = Font(size=10, color="0563C1", underline="single")
         # 列宽
-        for ci in range(1, len(_RAW_PRODUCT_COLUMNS) + 1):
-            ws.column_dimensions[get_column_letter(ci)].width = _RAW_PRODUCT_COL_WIDTHS.get(_RAW_PRODUCT_COLUMNS[ci - 1], 12)
+        for ci in range(1, ncols + 1):
+            ws.column_dimensions[get_column_letter(ci)].width = _RAW_PRODUCT_COL_WIDTHS.get(columns[ci - 1], 12)
         # 行高自适应
         ws.row_dimensions[ri].height = max(20, _auto_height_value(item))
 
@@ -1022,7 +1089,8 @@ def generate_report_node(
     ws.title = "市场体量"
 
     n_cols = 3 + len(years) + 1
-    table_last_row = _build_table(ws, shop_name, state.stat_time, years, state.categories)
+    table_last_row = _build_table(ws, shop_name, state.stat_time, years, state.categories,
+                                  getattr(state, "global_sales_yoy_pct", None))
 
     src_col = n_cols + 3  # 数据源放在表格右侧空列，随后隐藏
     _build_chart(ws, shop_name, years, state.monthly_summary, table_last_row, n_cols, src_col)

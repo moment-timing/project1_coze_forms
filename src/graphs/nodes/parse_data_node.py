@@ -1,5 +1,5 @@
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -60,6 +60,10 @@ def _parse_categories(cats_raw: Any) -> List[CategoryData]:
             for r in raw_d:
                 if isinstance(r, dict):
                     raw_detail.append(dict(r))
+        sales_yoy_pct: Optional[float] = None
+        raw_yoy = c.get("sales_yoy_pct")
+        if isinstance(raw_yoy, (int, float)) and not isinstance(raw_yoy, bool):
+            sales_yoy_pct = float(raw_yoy)
         categories.append(
             CategoryData(
                 platform=str(c.get("platform", "")),
@@ -67,6 +71,7 @@ def _parse_categories(cats_raw: Any) -> List[CategoryData]:
                 agg_year=agg_year,
                 agg_quarter=agg_quarter,
                 latest_month_raw_data=raw_detail,
+                sales_yoy_pct=sales_yoy_pct,
             )
         )
     return categories
@@ -153,6 +158,11 @@ def parse_data_node(
 
     raw_product_data = _collect_raw_product_data(categories)
 
+    global_yoy: Optional[float] = None
+    raw_global_yoy = data.get("global_sales_yoy_pct")
+    if isinstance(raw_global_yoy, (int, float)) and not isinstance(raw_global_yoy, bool):
+        global_yoy = float(raw_global_yoy)
+
     return ParseDataOutput(
         shop_name=shop_name,
         stat_time=stat_time,
@@ -162,4 +172,5 @@ def parse_data_node(
         years=years,
         platform_brand_summary=brand_summary,
         raw_product_data=raw_product_data,
+        global_sales_yoy_pct=global_yoy,
     )
