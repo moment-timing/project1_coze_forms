@@ -259,6 +259,7 @@ def _apply_yoy_cell(cell, raw: Any, latest_year: str, bold: bool = False) -> Non
     text = _format_yoy_text(raw, latest_year)
     cell.value = text
     cell.number_format = "@"
+    cell.alignment = CENTER
     if bold:
         cell.font = Font(bold=True)
     else:
@@ -329,6 +330,8 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
                 v = _gmv_for(cat.agg_year, y)
                 cell = ws.cell(row, 4 + i, round(v, 2))
                 cell.number_format = "#,##0.00"
+              # ------------------------------------ 居中 ---------------
+                cell.alignment = CENTER  
                 plat_gmv[i] += v
                 total_gmv[i] += v
             last_col_idx = 3 + len(years) + 1
@@ -349,13 +352,11 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
             cell = ws.cell(row, 4 + i, round(plat_gmv[i], 2))
             cell.number_format = "#,##0.00"
             cell.font = Font(bold=True)
+            cell.alignment = CENTER
         last_col_idx = 3 + len(years) + 1
         g = _calc_growth(plat_gmv[-1], plat_gmv[-2])
-        cell = ws.cell(row, last_col_idx, g)
-        cell.number_format = '0.00"%"'
-        cell.font = Font(bold=True)
-        if g is not None and g < 0:
-            cell.font = Font(bold=True, color="C00000")
+        cell = ws.cell(row, last_col_idx)
+        _apply_yoy_cell(cell, g, years[-1], bold=True)
         for c in range(1, n_cols + 1):
             ws.cell(row, c).fill = PatternFill("solid", fgColor=SUBTOTAL_FILL)
         ws.row_dimensions[row].height = BODY_ROW_H
@@ -374,6 +375,7 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
     for i in range(len(years)):
         cell = ws.cell(row, 4 + i, round(total_gmv[i], 2))
         cell.number_format = "#,##0.00"
+        cell.alignment = CENTER 
         cell.font = Font(bold=True)
     last_col_idx = 3 + len(years) + 1
     cell = ws.cell(row, last_col_idx)
