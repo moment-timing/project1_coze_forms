@@ -1,0 +1,28 @@
+需要修改内容如下：
+1、平台小计也不用计算了，源数据中会有如下数据：
+{
+  "meta": {...},
+  "category_list": [...],
+
+  "global_monthly_summary": [...],
+
+  "platform_brand_summary": [...],
+
+  "global_sales_yoy_pct": -23.0,
+
+  "platform_sales_yoy_pct": [
+    {"platform": "抖音", "sales_yoy_pct": -58.04},
+    {"platform": "天猫", "sales_yoy_pct": -48.27},
+    {"platform": "京东", "sales_yoy_pct": -42.34}
+  ]
+}
+根据"platform_sales_yoy_pct"里的内容填到对应的excel位置如：
+	"platform": "抖音", "sales_yoy_pct": -58.04	把其中的"sales_yoy_pct"的值填到抖音小计的增幅字段
+	"platform": "天猫", "sales_yoy_pct": -48.27	把其中的"sales_yoy_pct"的值填到天猫小计的增幅字段
+	"platform": "京东", "sales_yoy_pct": -42.34	把其中的"sales_yoy_pct"的值填到京东小计的增幅字段
+	"global_sales_yoy_pct"  的值填到最后面的一格，也就是全局增幅那  
+代码里不用做任何增幅率的计算。
+
+2、其他内容和逻辑不用修改
+
+！！！没有数据不要捏造数据，按实际数据填写

@@ -163,6 +163,23 @@ def parse_data_node(
     if isinstance(raw_global_yoy, (int, float)) and not isinstance(raw_global_yoy, bool):
         global_yoy = float(raw_global_yoy)
 
+    # 分平台销售额同比增幅：platform -> sales_yoy_pct
+    platform_yoy: Dict[str, Optional[float]] = {}
+    raw_plat_yoy = data.get("platform_sales_yoy_pct")
+    if isinstance(raw_plat_yoy, list):
+        for p in raw_plat_yoy:
+            if not isinstance(p, dict):
+                continue
+            pname = str(p.get("platform", "") or "")
+            if not pname:
+                continue
+            pval = p.get("sales_yoy_pct")
+            platform_yoy[pname] = (
+                float(pval)
+                if isinstance(pval, (int, float)) and not isinstance(pval, bool)
+                else None
+            )
+
     return ParseDataOutput(
         shop_name=shop_name,
         stat_time=stat_time,
@@ -173,4 +190,5 @@ def parse_data_node(
         platform_brand_summary=brand_summary,
         raw_product_data=raw_product_data,
         global_sales_yoy_pct=global_yoy,
+        platform_sales_yoy_pct=platform_yoy,
     )

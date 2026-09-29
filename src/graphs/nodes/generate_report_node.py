@@ -270,8 +270,14 @@ def _apply_yoy_cell(cell, raw: Any, latest_year: str, bold: bool = False) -> Non
 
 
 def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categories: List[CategoryData],
-                 global_sales_yoy_pct: Optional[float] = None) -> int:
-    """构建“市场体量”数据表，返回表体最后一行行号。"""
+                 global_sales_yoy_pct: Optional[float] = None,
+                 platform_sales_yoy_pct: Optional[Dict[str, Optional[float]]] = None) -> int:
+    """构建“市场体量”数据表，返回表体最后一行行号。
+
+    增幅列不自行计算：类目行读取 category.sales_yoy_pct，平台小计行读取
+    platform_sales_yoy_pct[platform]，总计行读取 global_sales_yoy_pct。
+    """
+    plat_yoy_map: Dict[str, Optional[float]] = platform_sales_yoy_pct or {}
     n_cols = 3 + len(years) + 1
     last_col = get_column_letter(n_cols)
 
@@ -354,9 +360,10 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
             cell.font = Font(bold=True)
             cell.alignment = CENTER
         last_col_idx = 3 + len(years) + 1
-        g = _calc_growth(plat_gmv[-1], plat_gmv[-2])
+        # 平台小计增幅：读取源数据 platform_sales_yoy_pct 对应平台的值，不再自行计算
+        plat_yoy_raw = plat_yoy_map.get(plat)
         cell = ws.cell(row, last_col_idx)
-        _apply_yoy_cell(cell, g, years[-1], bold=True)
+        _apply_yoy_cell(cell, plat_yoy_raw, years[-1], bold=True)
         for c in range(1, n_cols + 1):
             ws.cell(row, c).fill = PatternFill("solid", fgColor=SUBTOTAL_FILL)
         ws.row_dimensions[row].height = BODY_ROW_H
@@ -1092,7 +1099,8 @@ def generate_report_node(
 
     n_cols = 3 + len(years) + 1
     table_last_row = _build_table(ws, shop_name, state.stat_time, years, state.categories,
-                                  getattr(state, "global_sales_yoy_pct", None))
+                                  getattr(state, "global_sales_yoy_pct", None),
+                                  getattr(state, "platform_sales_yoy_pct", None))
 
     src_col = n_cols + 3  # 数据源放在表格右侧空列，随后隐藏
     _build_chart(ws, shop_name, years, state.monthly_summary, table_last_row, n_cols, src_col)

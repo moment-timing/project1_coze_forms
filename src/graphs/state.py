@@ -31,6 +31,7 @@ class GlobalState(BaseModel):
     platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据(platform_brand_summary)")
     raw_product_data: List[Dict[str, Any]] = Field(default=[], description="最近一月商品原始明细数据(按平台合并，仅用作另开sheet展示，不参与大模型分析)")
     global_sales_yoy_pct: Optional[float] = Field(default=None, description="全局销售额同比增幅%(源数据自带)")
+    platform_sales_yoy_pct: Dict[str, Optional[float]] = Field(default={}, description="分平台销售额同比增幅%(platform→sales_yoy_pct，源数据自带)")
     analysis_result: Dict[str, Any] = Field(default={}, description="市场分析结果(年度/季度/平台品牌/趋势/结论 + 品牌分析表)")
     pie_data: List[Dict[str, Any]] = Field(default=[], description="各平台品牌份额饼图数据")
     report_key: str = Field(default="", description="对象存储上报的key")
@@ -65,6 +66,7 @@ class ParseDataOutput(BaseModel):
     platform_brand_summary: List[Dict[str, Any]] = Field(default=[], description="平台品牌汇总数据")
     raw_product_data: List[Dict[str, Any]] = Field(default=[], description="最近一月商品原始明细数据(按平台合并)")
     global_sales_yoy_pct: Optional[float] = Field(default=None, description="全局销售额同比增幅%(源数据自带)")
+    platform_sales_yoy_pct: Dict[str, Optional[float]] = Field(default={}, description="分平台销售额同比增幅%(platform→sales_yoy_pct，源数据自带)")
 
 
 class AnalysisInput(BaseModel):
@@ -97,6 +99,7 @@ class GenerateReportInput(BaseModel):
     pie_data: List[Dict[str, Any]] = Field(default=[], description="各平台品牌份额饼图数据")
     raw_product_data: List[Dict[str, Any]] = Field(default=[], description="最近一月商品原始明细数据(按平台合并，另开sheet展示)")
     global_sales_yoy_pct: Optional[float] = Field(default=None, description="全局销售额同比增幅%(源数据自带)")
+    platform_sales_yoy_pct: Dict[str, Optional[float]] = Field(default={}, description="分平台销售额同比增幅%(platform→sales_yoy_pct，源数据自带)")
 
 
 class GenerateReportOutput(BaseModel):
