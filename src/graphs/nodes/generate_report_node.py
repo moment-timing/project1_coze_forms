@@ -269,9 +269,47 @@ def _apply_yoy_cell(cell, raw: Any, latest_year: str, bold: bool = False) -> Non
         cell.font = Font(bold=bold, color="C00000")
 
 
+def _build_growth_note(years: List[str], monthly: Optional[List[Dict[str, Any]]]) -> str:
+    """根据年月数据生成增幅列的数据范围说明。
+
+    例如："增幅列：由2025年1-8月与2026年1-8月数据计算得出"。
+    仅基于已有月度数据统计各同比年可统计的起止月份；数据缺失时返回空串，不虚构。
+    """
+    prev_y = str(years[-2]) if len(years) >= 2 else ""
+    latest_y = str(years[-1]) if years else ""
+    if not prev_y or not latest_y:
+        return ""
+    month_range: Dict[str, List[int]] = {prev_y: [], latest_y: []}
+    if isinstance(monthly, list):
+        for m in monthly:
+            if not isinstance(m, dict):
+                continue
+            ym = str(m.get("月", "") or "")
+            my = re.match(r"^(\d{4})[-/.年]?(\d{1,2})", ym)
+            if not my:
+                continue
+            y, mo = my.group(1), int(my.group(2))
+            if y in month_range and 1 <= mo <= 12:
+                month_range[y].append(mo)
+    if prev_y not in month_range or latest_y not in month_range:
+        return ""
+    prev_mo = month_range[prev_y]
+    latest_mo = month_range[latest_y]
+    if not prev_mo or not latest_mo:
+        return ""
+    prev_cover = f"{min(prev_mo)}-{max(prev_mo)}" if len(set(prev_mo)) > 1 or True else f"{prev_mo[0]}"
+    latest_cover = f"{min(latest_mo)}-{max(latest_mo)}" if len(set(latest_mo)) > 1 or True else f"{latest_mo[0]}"
+    if min(prev_mo) == max(prev_mo):
+        prev_cover = str(prev_mo[0])
+    if min(latest_mo) == max(latest_mo):
+        latest_cover = str(latest_mo[0])
+    return f"增幅列：由{prev_y}年{prev_cover}月与{latest_y}年{latest_cover}月数据计算得出"
+
+
 def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categories: List[CategoryData],
                  global_sales_yoy_pct: Optional[float] = None,
-                 platform_sales_yoy_pct: Optional[Dict[str, Optional[float]]] = None) -> int:
+                 platform_sales_yoy_pct: Optional[Dict[str, Optional[float]]] = None,
+                 monthly: Optional[List[Dict[str, Any]]] = None) -> int:
     """构建“市场体量”数据表，返回表体最后一行行号。
 
     增幅列不自行计算：类目行读取 category.sales_yoy_pct，平台小计行读取
@@ -416,6 +454,10 @@ def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categorie
         f"数据来源：{shop_name} 相关类目各平台品类数据",
         "单位：GMV 数值为万元；增幅为较上年度的增长率。",
     ]
+    # 增幅列说明：由同比两段可统计月份数据计算得出(如 2025年1-8月 与 2026年1-8月)
+    growth_note = _build_growth_note(years, monthly)
+    if growth_note:
+        notes.append(growth_note)
     for n in notes:
         cell = ws.cell(note_row, 1, n)
         cell.font = Font(size=9, color="808080")
@@ -1100,7 +1142,8 @@ def generate_report_node(
     n_cols = 3 + len(years) + 1
     table_last_row = _build_table(ws, shop_name, state.stat_time, years, state.categories,
                                   getattr(state, "global_sales_yoy_pct", None),
-                                  getattr(state, "platform_sales_yoy_pct", None))
+                                  getattr(state, "platform_sales_yoy_pct", None),
+                                  state.monthly_summary)
 
     src_col = n_cols + 3  # 数据源放在表格右侧空列，随后隐藏
     _build_chart(ws, shop_name, years, state.monthly_summary, table_last_row, n_cols, src_col)
