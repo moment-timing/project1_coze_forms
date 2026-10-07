@@ -21,11 +21,11 @@
 - 饼图数据标签：设置系列标题以避免"系列1"，`showCatName`+`showPercent`+`dLblPos=outEnd`，数据标签字号经 `txPr defRPr` 放大以提高可读性、避免字体拥挤重叠
 
 ## 数据说明
-- 输入 `data_json`：钉钉平台输出，支持 `{"output_json_string": "<json字符串>"}` 包裹或直接为数据对象
+- 输入 `data_json`：钉钉平台输出，支持 `{"output_json_string": "<json字符串>"}` 包裹或直接为数据对象；解析对非标准 JSON 做容错（json.loads → ast.literal_eval 兼容单引号键/值）
 - 数据内字段：`meta.shop_name` / `meta.stat_time`、`category_list[].{platform, category_name, agg_year, agg_quarter}`、`global_monthly_summary[].{月, 销售额(元)}`、`platform_brand_summary[].{platform, brand_list:[{品牌, 销售额(元), 销量(件)}]}`
 - agg_year 内为 `{年, 销售额(元), 销量(件), 均价(元)}`
 - agg_quarter 内为 `{季度, 销售额(元)}`，由 parse_data 解析为 `QuarterData(platform, category_name, agg_quarter)` 经 GlobalState.quarter_data 流入 analysis 上下文，保证季度维度有据可依
 - `category_list[].latest_month_raw_data` 为最近一月商品原始明细(含年/月/平台/品类/品牌/店铺/商品名/商品ID/URL/销售额/销量/均价，可能含"四级品类")。parse_data 按平台合并为 `raw_product_data`，仅经 GlobalState→GenerateReportInput 流入 generate_report，**不进入 AnalysisInput/大模型**；generate_report 在其中存在数据时另开"商品源数据"sheet 如实填充，若任一明细含"四级品类"则动态在"三级品类"后插入该列，否则沿用基础列；商品ID按文本写避免科学计数法，无数据则不新增该sheet
 - 增幅字段(同比)不再内部计算，直接读取源数据：类目行 `category_list[].sales_yoy_pct`、平台小计行 `platform_sales_yoy_pct[].{platform, sales_yoy_pct}`、总计行顶层 `global_sales_yoy_pct`。展示规则：数字(如134.13)→"134.13%"并加粗；缺失/0/null→"最新年份-1年同时期为0"；负值标红。parse_data 将 `platform_sales_yoy_pct` 解析为 `{platform: Optional[float]}` 字典，三者经 ParseDataOutput→GlobalState→GenerateReportInput 流入；**不进入 AnalysisInput/大模型**，避免改变 LLM 分析输入
-- 市场体量表底部注释额外追加一行增幅列数据范围说明"增幅列：由{上年}年{x-y}月与{最新年}年{x-y}月数据计算得出"，基于 `global_monthly_summary` 实际覆盖月份动态生成（无月份数据时省略该行，不虚构）
+- 市场体量表底部注释额外追加一行增幅列数据范围说明"增幅列：{上年}年1-M月/{最新年}年1-M月"，M 取 `global_monthly_summary` 中最新年份出现的最新月份作为同比截止（无月份数据时省略该行，不虚构）
 - 品牌指标（CR3、HHI、集中度、切入难度、饼图占比）由 `analysis` 节点基于 `platform_brand_summary` 确定性计算，严格取自源数据，无数据时如实输出"无数据"，禁止编造

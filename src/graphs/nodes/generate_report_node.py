@@ -270,15 +270,17 @@ def _apply_yoy_cell(cell, raw: Any, latest_year: str, bold: bool = False) -> Non
 
 
 def _build_growth_note(years: List[str], monthly: Optional[List[Dict[str, Any]]]) -> str:
-    """根据年月数据生成增幅列的数据范围说明。
+    """生成增幅列的数据范围说明，以最新数据所在月份为截止。
 
-    例如："增幅列：由2025年1-8月与2026年1-8月数据计算得出"。
-    仅基于已有月度数据统计各同比年可统计的起止月份；数据缺失时返回空串，不虚构。
+    例如："增幅列：2025年1-8月/2026年1-8月"。
+    取最新年份在月度数据中出现的最新月份 M，前缀年份与最新年份均写 1~M 月。
+    数据缺失时返回空串，不虚构。
     """
     prev_y = str(years[-2]) if len(years) >= 2 else ""
     latest_y = str(years[-1]) if years else ""
     if not prev_y or not latest_y:
         return ""
+    # 记录各同比年出现的月份
     month_range: Dict[str, List[int]] = {prev_y: [], latest_y: []}
     if isinstance(monthly, list):
         for m in monthly:
@@ -291,19 +293,11 @@ def _build_growth_note(years: List[str], monthly: Optional[List[Dict[str, Any]]]
             y, mo = my.group(1), int(my.group(2))
             if y in month_range and 1 <= mo <= 12:
                 month_range[y].append(mo)
-    if prev_y not in month_range or latest_y not in month_range:
-        return ""
-    prev_mo = month_range[prev_y]
     latest_mo = month_range[latest_y]
-    if not prev_mo or not latest_mo:
+    if not latest_mo:
         return ""
-    prev_cover = f"{min(prev_mo)}-{max(prev_mo)}" if len(set(prev_mo)) > 1 or True else f"{prev_mo[0]}"
-    latest_cover = f"{min(latest_mo)}-{max(latest_mo)}" if len(set(latest_mo)) > 1 or True else f"{latest_mo[0]}"
-    if min(prev_mo) == max(prev_mo):
-        prev_cover = str(prev_mo[0])
-    if min(latest_mo) == max(latest_mo):
-        latest_cover = str(latest_mo[0])
-    return f"增幅列：由{prev_y}年{prev_cover}月与{latest_y}年{latest_cover}月数据计算得出"
+    end_mo = max(latest_mo)
+    return f"增幅列：{prev_y}年1-{end_mo}月/{latest_y}年1-{end_mo}月"
 
 
 def _build_table(ws, shop_name: str, stat_time: str, years: List[str], categories: List[CategoryData],

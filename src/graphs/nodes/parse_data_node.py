@@ -1,3 +1,4 @@
+import ast
 import json
 from typing import List, Dict, Any, Optional
 
@@ -8,29 +9,51 @@ from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import ParseDataInput, ParseDataOutput, CategoryData, QuarterData
 
 
+def _parse_json_like(text: str) -> Any:
+    """尽量宽容地将文本解析为 Python/JSON 对象。
+
+    钉钉平台输出的内容可能使用单引号(非标准 JSON)，这里依次尝试：
+    1. json.loads（标准 JSON）
+    2. ast.literal_eval（兼容 Python 字面量，如单引号键/字符串）
+    3. 将单引号键/值转换为双引号后 json.loads（兜底）
+    """
+    s = text.strip()
+    if not s:
+        raise ValueError("输入数据为空")
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+    # 尝试 Python 字面量（单引号等）
+    try:
+        return ast.literal_eval(s)
+    except Exception as exc:
+        raise ValueError(f"无法解析输入数据: {exc}") from exc
+
+
 def _extract_inner_data(raw: str) -> Dict[str, Any]:
     """将输入数据解析为最内层的数据对象。
 
     支持两种输入：
     1. 外层包裹 {"output_json_string": "<json字符串>"}
     2. 直接为数据对象本身
+    对非标准 JSON（如单引号）做容错解析。
     """
-    if not raw or not raw.strip():
-        raise ValueError("输入数据为空，请提供钉钉平台的输出数据")
-
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError("输入数据不是合法的JSON对象")
+    parsed = _parse_json_like(raw)
+    data = parsed if isinstance(parsed, dict) else {}
 
     inner = data.get("output_json_string")
     if inner is not None:
         if isinstance(inner, str):
-            data = json.loads(inner)
+            data = _parse_json_like(inner)
         elif isinstance(inner, dict):
             data = inner
 
     if not isinstance(data, dict):
         raise ValueError("数据解析后不是合法的JSON对象")
+
+    if not data:
+        raise ValueError("数据内容为空，请提供有效数据")
 
     return data
 
