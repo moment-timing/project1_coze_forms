@@ -154,10 +154,23 @@ def _build_trend_ctx(monthly: List[Dict[str, Any]], years: List[str]) -> str:
 
 
 def _is_other(name: str) -> bool:
-    """判断品牌名是否属于『其他/Other』聚合分类(不参与竞争情况TOP分析)。"""
-    n = (name or "").lower()
-    return "其他" in n or ("other" in n and "cother" not in n) or n.strip() in ("", "未知品牌")
+    """判断品牌名是否属于聚合分类（不参与 CR3 / HHI / 竞争情况 TOP 分析）。
 
+    覆盖两类：
+    1) 原始“其他 Other”
+    2) 上游截断产生的“剩余品牌”
+    """
+    n = (name or "").strip()
+    if not n:
+        return True
+    if n == "剩余品牌":
+        return True
+    nl = n.lower()
+    if "其他" in nl:
+        return True
+    if "other" in nl and "cother" not in nl:
+        return True
+    return nl in ("", "未知品牌")
 
 def _conc_level(cr3: float, hhi: float) -> str:
     if cr3 >= 70 or hhi >= 2500:
@@ -226,15 +239,21 @@ def _build_brand_analysis(
         if not shares:
             continue
 
-        top3 = shares[:3]
+
+        # 真实品牌：剔除“其他 Other”和“剩余品牌”，仅用于 CR3
+        real_shares = [s for s in shares if not _is_other(s["品牌"])]
+        # CR3：真实品牌中占比前三
+        top3 = real_shares[:3]
         cr3 = sum(s["占比"] for s in top3)
+        # HHI：使用全量品牌（含“其他 Other”和“剩余品牌”）
         hhi = sum(s["占比"] ** 2 for s in shares)
 
         # 品牌情况：按指令写“如下图（XX品牌发布图）”，指向下方对应平台的饼图
         brand_desc = f"如下图（{plat}品牌发布图）"
 
         # 竞争情况：取除“其他Other”外销售额前三，逐行展示 top1/top2/top3
-        comp_top = [s for s in shares if not _is_other(s["品牌"])][:3]
+        # comp_top = [s for s in shares if not _is_other(s["品牌"])][:3]
+        comp_top = real_shares[:3]
         if comp_top:
             comp = "\n".join(
                 f"TOP{i+1} {s['品牌']} {s['占比']:.2f}%" for i, s in enumerate(comp_top)
@@ -258,8 +277,14 @@ def _build_brand_analysis(
         slices_sorted = sorted(shares, key=lambda x: x["销售额(元)"], reverse=True)
         pie_slices = [{"品牌": s["品牌"], "销售额(元)": s["销售额(元)"], "占比": s["占比"]} for s in slices_sorted]
         pie_data.append({"平台": plat, "slices": pie_slices})
+
+        # pie_notes.append(
+        #     f"{plat}：头部品牌{shares[0]['品牌']}占比{shares[0]['占比']:.2f}%，CR3={cr3:.2f}%，市场{_conc_level(cr3, hhi)}。"
+        # )
+        top1_name = real_shares[0]["品牌"] if real_shares else "无"
+        top1_pct = real_shares[0]["占比"] if real_shares else 0.0
         pie_notes.append(
-            f"{plat}：头部品牌{shares[0]['品牌']}占比{shares[0]['占比']:.2f}%，CR3={cr3:.2f}%，市场{_conc_level(cr3, hhi)}。"
+            f"{plat}：头部品牌{top1_name}占比{top1_pct:.2f}%，CR3={cr3:.2f}%，市场{_conc_level(cr3, hhi)}。"
         )
 
         # 品牌分析表：每个类目单独一行显示(类目列不合并多值)
@@ -272,7 +297,7 @@ def _build_brand_analysis(
                 "集中度说明": concentration,
                 "竞争情况": comp,
                 "目标产品类目占比": "100.00%",
-                "切入难度": _farm_level(shares[0]["占比"], hhi),
+                "切入难度": _farm_level(top1_pct, hhi),
             })
 
     if not table_rows:
