@@ -68,13 +68,14 @@ MIN_ROW_H = 20.0       # 最小行高(磅)
 CH_PER_UNIT = 2.0      # 一列宽单位可容纳的显示宽度(中文按2计)
 # 品牌分析区列宽(可手动微调；最终会再乘 COL_W_SCALE)
 BRAND_COL_WIDTHS = {"A": 20, "B": 18, "C": 38, "D": 18, "E": 18, "F": 18, "G": 18, "H": 13}
+
 # 饼图区参数
 PIE_SPACING = 2        # 相邻饼图间隔列数(过大会导致三个饼图相距过远)
-PIE_WIDTH = 8        # 饼图宽度(cm)
-PIE_HEIGHT = 8       # 饼图高度(cm)
-PIE_H_ROWS = 16        # 饼图占用行数(由高度估算，用于文字避让)
-PIE_GAP_CM = 3     # 相邻两张饼图之间的留白(厘米)，间距即由它控制
-PIE_SLOT_CM = 9.5   # 每张饼图占用的横向槽宽(厘米)，含标签+间距
+PIE_WIDTH = 10       # 饼图宽度(cm)，加大给右侧图例留空间
+PIE_HEIGHT = 11       # 饼图高度(cm)
+PIE_H_ROWS = 17        # 饼图占用行数(由高度估算，用于文字避让)，随高度调大
+# PIE_GAP_CM = 1.5     # 相邻两张饼图之间的留白(厘米)，间距即由它控制
+PIE_SLOT_CM = 11.5   # 每张饼图占用的横向槽宽(厘米)，需 ≥ PIE_WIDTH + 1.5
 
 # 行高/列宽可整体调节系数(内容换行后按需放大，手动微调请改这里)
 ROW_H_SCALE = 1.0      # 行高整体缩放(>1 放大，<1 缩小)
@@ -888,8 +889,10 @@ def _write_pie_charts(ws, pie_data: List[Dict[str, Any]], shop_name: str,
         if n > max_rows:
             max_rows = n
 
-    # 饼图底部预留 PIE_H_ROWS 行，避免后续“说明/小结”文字被图表遮挡
-    return chart_row + PIE_H_ROWS
+    # 饼图底部预留行数：按 PIE_HEIGHT 实际行高换算，并与 PIE_H_ROWS 取大
+    pie_bottom = _chart_comment_row(ws, chart_row, PIE_HEIGHT)
+    return max(pie_bottom, chart_row + PIE_H_ROWS)
+    # return chart_row + PIE_H_ROWS
 
 
 def _write_analysis_text(ws, analysis_result: Dict[str, Any], start_row: int) -> int:

@@ -154,7 +154,7 @@ def _build_trend_ctx(monthly: List[Dict[str, Any]], years: List[str]) -> str:
 
 
 def _is_other(name: str) -> bool:
-    """判断品牌名是否属于聚合分类（不参与 CR3 / HHI / 竞争情况 TOP 分析）。
+    """判断品牌名是否属于聚合分类（不参与 CR3 / 竞争情况 TOP 分析；HHI 仍使用全量品牌）。
 
     覆盖两类：
     1) 原始“其他 Other”
@@ -251,8 +251,7 @@ def _build_brand_analysis(
         # 品牌情况：按指令写“如下图（XX品牌发布图）”，指向下方对应平台的饼图
         brand_desc = f"如下图（{plat}品牌发布图）"
 
-        # 竞争情况：取除“其他Other”外销售额前三，逐行展示 top1/top2/top3
-        # comp_top = [s for s in shares if not _is_other(s["品牌"])][:3]
+        # 竞争情况：取真实品牌（剔除“其他 Other”和“剩余品牌”）销售额前三
         comp_top = real_shares[:3]
         if comp_top:
             comp = "\n".join(
@@ -273,14 +272,11 @@ def _build_brand_analysis(
         if not cat_names:
             cat_names = ["全品类"]
 
-        # 饼图数据：每个平台按品牌销售额做饼图，brand_list 里有几个品牌就画几个(含其他Other)，不做长尾合并
+        # 饼图数据：每个平台按品牌销售额做饼图，brand_list 里全部品牌都画(含“其他 Other”和“剩余品牌”)，不做长尾合并
         slices_sorted = sorted(shares, key=lambda x: x["销售额(元)"], reverse=True)
         pie_slices = [{"品牌": s["品牌"], "销售额(元)": s["销售额(元)"], "占比": s["占比"]} for s in slices_sorted]
         pie_data.append({"平台": plat, "slices": pie_slices})
 
-        # pie_notes.append(
-        #     f"{plat}：头部品牌{shares[0]['品牌']}占比{shares[0]['占比']:.2f}%，CR3={cr3:.2f}%，市场{_conc_level(cr3, hhi)}。"
-        # )
         top1_name = real_shares[0]["品牌"] if real_shares else "无"
         top1_pct = real_shares[0]["占比"] if real_shares else 0.0
         pie_notes.append(
